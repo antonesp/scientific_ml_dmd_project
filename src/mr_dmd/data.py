@@ -1,14 +1,16 @@
 from pathlib import Path
 
 import typer
+import netCDF4
 from torch.utils.data import Dataset
 
 
-class MyDataset(Dataset):
+class ncDataset(Dataset):
     """My custom dataset."""
 
     def __init__(self, data_path: Path) -> None:
         self.data_path = data_path
+        self.data = netCDF4.Dataset(self.data_path)
 
     def __len__(self) -> int:
         """Return the length of the dataset."""
@@ -19,6 +21,7 @@ class MyDataset(Dataset):
     def preprocess(self, output_folder: Path) -> None:
         """Preprocess the raw data and save it to the output folder."""
 
+
 def preprocess(data_path: Path, output_folder: Path) -> None:
     print("Preprocessing data...")
     dataset = MyDataset(data_path)
@@ -26,4 +29,4 @@ def preprocess(data_path: Path, output_folder: Path) -> None:
 
 
 if __name__ == "__main__":
-    typer.run(preprocess)
+    typer.run(preprocess("data/"))
