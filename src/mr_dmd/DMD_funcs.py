@@ -12,14 +12,13 @@ def DMD(X,Xprime,r):
     Atilde = jnp.linalg.solve(Sigmar.T,(Ur.T @ Xprime @ VTr.T
     ).T).T # Step 2
     Lambda, W = jnp.linalg.eig(Atilde) # Step 3
-    Lambda = jnp.diag(Lambda)
+    #Lambda = jnp.diag(Lambda)
     # Step 4
     Phi = Xprime @ jnp.linalg.solve(Sigmar.T,VTr).T @ W
     alpha1 = Sigmar @ VTr[:,0]
-    b = jnp.linalg.solve(W @ Lambda,alpha1)
+    b = jnp.linalg.solve(W @ jnp.diag(Lambda),alpha1)
 
     return Phi, Lambda, b
-
 
 
 def fbDMD(X,Y, r):
@@ -63,6 +62,46 @@ def fbDMD(X,Y, r):
 
     return Phi, Lambda
 
+
+def mrDMD(X, Y, M, L, f, dt, T):
+    """
+    Multi resolution DMD function:
+    - X:  Datapoints at t_n
+    - Y:  Datapoints at t_n+1
+    - M:  number of modes used in the first level when computing DMD
+    - L:  the number of levels
+    - f:  Indicator function
+    - dt: Time between datapoints
+    - T:  Total number of timesteps
+    """
+    
+    x = lambda t: 0 * t
+
+    
+    for l in range(L):
+        J = 2**l
+        r = M/J
+        time_split_size = T/J
+        ts_idx = jnp.linspace(0, T, J+1)
+
+        X_temp = lambda t: jnp.zeros_like(X)*t
+
+        for j in range(J):
+            Phi, Lambda, b = DMD(X[ts_idx[j]:ts_idx[j+1]], Y[ts_idx[j]:ts_idx[j+1]], r)
+            omega = jnp.log(Lambda)/dt
+            freq = jnp.abs(jnp.imag(omega))/(2*jnp.pi)
+            mask = freq <= 1/time_split_size
+
+            X_temp = Phi
+        
+            x = lambda t: x + f(l+1, j+1, t) * b[mask, j] * Phi[mask, j] * jnp.exp(omega[mask, j] * t)
+
+
+
+
+
+
+    return 0
 
 
 if __name__ == "__main__":
