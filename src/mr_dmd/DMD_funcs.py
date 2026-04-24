@@ -63,7 +63,7 @@ def fbDMD(X,Y, r):
     return Phi, Lambda
 
 
-def mrDMD(X, Y, M, L, f, dt, T):
+def mrDMD(X, Y, M, L, f, dt, ts):
     """
     Multi resolution DMD function:
     - X:  Datapoints at t_n
@@ -72,36 +72,76 @@ def mrDMD(X, Y, M, L, f, dt, T):
     - L:  the number of levels
     - f:  Indicator function
     - dt: Time between datapoints
-    - T:  Total number of timesteps
+    - ts: The timesteps
     """
-    
-    x = lambda t: 0 * t
-
-    
+    T = ts.shape[0]                                        # Number of time steps
+   
+    funcs = []
     for l in range(L):
+        print(f"Layer: {l+1} of {L}")
         J = 2**l
-        r = M/J
-        time_split_size = T/J
-        ts_idx = jnp.linspace(0, T, J+1)
+        r = jnp.maximum(1, M//J)                                    # Ensure that r > 0
+        time_split_size = T/J                                       # Size of each time bin
+        ts_idx = jnp.linspace(0, X.shape[0], J+1, dtype=int)        # Splitting indecies
 
-        X_temp = lambda t: jnp.zeros_like(X)*t
-
+        if X.shape[0] < r:
+            break
+        
+        X_temps = [] 
         for j in range(J):
-            Phi, Lambda, b = DMD(X[ts_idx[j]:ts_idx[j+1]], Y[ts_idx[j]:ts_idx[j+1]], r)
+
+            # Compute time segments
+            t_segment = ts[ts_idx[j]:ts_idx[j+1]]
+            t_local = t_segment - t_segment[0]
+
+            X_bin = X[t_segment]
+            Y_bin = Y[t_segment]
+            
+            # Compute DMD for each time bin
+            Phi, Lambda, b = DMD(X_bin, Y_bin, r)
+
+            if X_bin.shape[0] < 2:
+                X_temps.append(X_bin.T)  # passthrough, shape (n_spatial, n_time)
+                continue
+
+            # Convert the eigenvalues and find the low frequency modes
             omega = jnp.log(Lambda)/dt
             freq = jnp.abs(jnp.imag(omega))/(2*jnp.pi)
             mask = freq <= 1/time_split_size
 
-            X_temp = Phi
-        
-            x = lambda t: x + f(l+1, j+1, t) * b[mask, j] * Phi[mask, j] * jnp.exp(omega[mask, j] * t)
+            # Extract low frequency modes to the mrDMD function
+            Phi_low = Phi[:, mask]
+            b_low = b[mask]
+            omega_low = omega[mask]
 
+            funcs.append(
+                lambda t, start=ts[ts_idx[j]], stop = ts[ts_idx[j+1]], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low:
+                    f(start, stop, t) *
+                    (Phi_low @ (b_low * jnp.exp(omega_low * t)))
+            )
 
+            # Reconstruct X using only the high frequency modes for each time bin
+            high_mask = ~mask
+            if jnp.any(high_mask):
+                Phi_high = Phi[:, high_mask]
+                b_high = b[high_mask][:, None]
+                omega_high = omega[high_mask][:, None]
+                exp_term = jnp.exp(omega_high* t_local)
+                X_temp = Phi_high @ (b_high * exp_term)
+            else:
+                X_temp = jnp.zeros((X.shape[1], len(t_segment)))
 
+            X_temps.append(X_temp)
+            print(X_temp.shape)
 
+            
+        # Combine X_temp to make new X and Y   
+        X_full = jnp.concatenate(X_temps, axis = 1)
+        Y = X_full[:, 1:].T
+        X = X_full[:, :-1].T
 
-
-    return 0
+    # Sum all the functions together
+    return lambda t: sum(g(t) for g in funcs)
 
 
 if __name__ == "__main__":
@@ -111,26 +151,30 @@ if __name__ == "__main__":
     r = 10
 
 
-    f = lambda x,t : 1 / (jnp.cosh(t*x+ 3))  + jnp.cos(x+t) + jnp.exp(t*1j)
+    g = lambda x,t : 1 / (jnp.cosh(t*x+ 3))  + jnp.cos(x+t) + jnp.exp(t*1j)
+    def f(start, stop, t):
+        if (t < start) or (t > stop): return 0
+        else: return 1
 
     x = jnp.linspace(0, 2*jnp.pi, n_steps)
     t = jnp.array(range(t_steps))
+    
 
-    raw = (f(x[:, None],t[None, :]))
+    raw = (g(x[:, None],t[None, :]))
 
-    X = raw[:,:-1]
-    X_prime = raw[:, 1:]
+    X = raw[:,:-1].T
+    X_prime = raw[:, 1:].T
 
     # Run the DMD
 
-    Phi, Lambda, b = DMD(X,X_prime,r)
+    x = mrDMD(X,X_prime,r, 4, f, 1, t)
 
 
-    f_10 = Phi  @ jnp.linalg.matrix_power(Lambda, 10) @ b
+    f_10 = x(10)
 
 
 
     plt.plot(x, jnp.abs(f_10), label = "reconstruction")
-    plt.plot(x, jnp.abs(raw[:, 10]), label = "true")
+    plt.plot(x, jnp.abs(raw[:, 10].T), label = "true")
     plt.legend()
     plt.show()
