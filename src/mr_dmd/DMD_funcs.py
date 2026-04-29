@@ -2,6 +2,7 @@ import scipy
 from matplotlib import pyplot as plt
 import jax.numpy as jnp
 import numpy as np
+from time import sleep
 
 def DMD(X,Xprime,r):
     U, Sigma, VT = jnp.linalg.svd(X,full_matrices=0) # Step 1
@@ -66,25 +67,25 @@ def fbDMD(X,Y, r):
 def mrDMD(X, Y, M, L, f, dt, ts):
     """
     Multi resolution DMD function:
-    - X:  Datapoints at t_n
-    - Y:  Datapoints at t_n+1
+    - X:  Datapoints at t_n (n_spacial, T)
+    - Y:  Datapoints at t_n+1 (n_spacial, T)
     - M:  number of modes used in the first level when computing DMD
     - L:  the number of levels
     - f:  Indicator function
     - dt: Time between datapoints
     - ts: The timesteps
     """
-    T = ts.shape[0]                                        # Number of time steps
+    T = ts.shape[0]                                                 # Number of time steps
    
     funcs = []
     for l in range(L):
         print(f"Layer: {l+1} of {L}")
         J = 2**l
-        r = jnp.maximum(1, M//J)                                    # Ensure that r > 0
-        time_split_size = T/J                                       # Size of each time bin
-        ts_idx = jnp.linspace(0, X.shape[0], J+1, dtype=int)        # Splitting indecies
+        r = jnp.maximum(1, M//J)                                    # Ensure that r > 0                                      # Size of each time bin
+        ts_idx = jnp.linspace(0, X.shape[1], J+1, dtype=int)        # Splitting indecies
 
-        if X.shape[0] < r:
+        if X.shape[1] < r:
+            print("Not enough timesteps for desired resolution")
             break
         
         X_temps = [] 
@@ -94,20 +95,21 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             t_segment = ts[ts_idx[j]:ts_idx[j+1]]
             t_local = t_segment - t_segment[0]
 
-            X_bin = X[t_segment]
-            Y_bin = Y[t_segment]
+            X_bin = X[:, ts_idx[j]:ts_idx[j+1]]
+            Y_bin = Y[:, ts_idx[j]:ts_idx[j+1]]
             
             # Compute DMD for each time bin
             Phi, Lambda, b = DMD(X_bin, Y_bin, r)
 
             if X_bin.shape[0] < 2:
-                X_temps.append(X_bin.T)  # passthrough, shape (n_spatial, n_time)
+                X_temps.append(X_bin)  # passthrough, shape (n_spatial, n_time)
                 continue
 
             # Convert the eigenvalues and find the low frequency modes
+            window_duration = (ts_idx[j+1] - ts_idx[j]) * dt
             omega = jnp.log(Lambda)/dt
             freq = jnp.abs(jnp.imag(omega))/(2*jnp.pi)
-            mask = freq <= 1/time_split_size
+            mask = freq <= 1/window_duration
 
             # Extract low frequency modes to the mrDMD function
             Phi_low = Phi[:, mask]
@@ -115,10 +117,11 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             omega_low = omega[mask]
 
             funcs.append(
-                lambda t, start=ts[ts_idx[j]], stop = ts[ts_idx[j+1]], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low:
+                lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
                     f(start, stop, t) *
-                    (Phi_low @ (b_low * jnp.exp(omega_low * t)))
+                    (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
             )
+            print(funcs[-1](5))
 
             # Reconstruct X using only the high frequency modes for each time bin
             high_mask = ~mask
@@ -129,7 +132,7 @@ def mrDMD(X, Y, M, L, f, dt, ts):
                 exp_term = jnp.exp(omega_high* t_local)
                 X_temp = Phi_high @ (b_high * exp_term)
             else:
-                X_temp = jnp.zeros((X.shape[1], len(t_segment)))
+                X_temp = jnp.zeros((X.shape[0], len(t_segment)))
 
             X_temps.append(X_temp)
             print(X_temp.shape)
@@ -137,8 +140,9 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             
         # Combine X_temp to make new X and Y   
         X_full = jnp.concatenate(X_temps, axis = 1)
-        Y = X_full[:, 1:].T
-        X = X_full[:, :-1].T
+        ts = ts[:X_full.shape[1]]
+        Y = X_full[:, 1:]
+        X = X_full[:, :-1]
 
     # Sum all the functions together
     return lambda t: sum(g(t) for g in funcs)
@@ -147,34 +151,51 @@ def mrDMD(X, Y, M, L, f, dt, ts):
 if __name__ == "__main__":
 
     t_steps = 200
-    n_steps = 50
-    r = 10
+    n_steps = 20
+    r = 30
+    t_max = 20
 
 
-    g = lambda x,t : 1 / (jnp.cosh(t*x+ 3))  + jnp.cos(x+t) + jnp.exp(t*1j)
+    g = lambda x,t : 1*jnp.cos(x + t)
     def f(start, stop, t):
         if (t < start) or (t > stop): return 0
         else: return 1
 
     x = jnp.linspace(0, 2*jnp.pi, n_steps)
-    t = jnp.array(range(t_steps))
+    x_precise = jnp.linspace(0, 2*jnp.pi, 500)
+    t = jnp.linspace(0, t_max, t_steps)
+    
     
 
     raw = (g(x[:, None],t[None, :]))
 
-    X = raw[:,:-1].T
-    X_prime = raw[:, 1:].T
+    X = raw[:,:-1]
+    X_prime = raw[:, 1:]
 
     # Run the DMD
+    L = 4
+    M = r
+    dt = t[1] - t[0]
+    fun = mrDMD(X,X_prime,M, L, f, dt, t)
 
-    x = mrDMD(X,X_prime,r, 4, f, 1, t)
+    t1 = 1
+    t2 = 6    
+
+    f_1 = fun(t1)
+    f_10 = fun(t2)
+    g_1 = g(x_precise, t1)
+    g_10 = g(x_precise, t2)
 
 
-    f_10 = x(10)
 
-
-
-    plt.plot(x, jnp.abs(f_10), label = "reconstruction")
-    plt.plot(x, jnp.abs(raw[:, 10].T), label = "true")
+    #plt.imshow(raw)
+    #plt.show()
+    print("Plotting")
+    print(f_10)
+    
+    #plt.plot(x_precise, jnp.real(g_1), label = f"true t={t1}")
+    #plt.scatter(x, jnp.real(f_1), label = f"reconstruction t={t1}", marker="x")
+    #plt.plot(x_precise, jnp.real(g_10), label = f"true t={t2}")
+    plt.scatter(x, jnp.real(f_10), label = f"reconstruction t={t2}", marker="x")
     plt.legend()
     plt.show()
