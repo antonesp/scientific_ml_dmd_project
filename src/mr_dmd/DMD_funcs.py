@@ -4,12 +4,17 @@ import jax.numpy as jnp
 import numpy as np
 from time import sleep
 
-def DMD(X,Xprime,r):
+def DMD(X,Xprime, r, energy_threshold=0.999):
     U, Sigma, VT = jnp.linalg.svd(X,full_matrices=0) # Step 1
+    # Choose r adaptively based on singular value energy (prevents nans from forming)
+    total_energy = jnp.sum(Sigma**2)
+    cumulative_energy = jnp.cumsum(Sigma**2) / total_energy
+    r_adaptive = int(jnp.searchsorted(cumulative_energy, energy_threshold)) + 1
+    r_adaptive = min(r, r_adaptive, len(Sigma))  # never exceed requested r
 
-    Ur = U[:,:r]
-    Sigmar = jnp.diag(Sigma[:r])
-    VTr = VT[:r,:]
+    Ur = U[:,:r_adaptive]
+    Sigmar = jnp.diag(Sigma[:r_adaptive])
+    VTr = VT[:r_adaptive,:]
     Atilde = jnp.linalg.solve(Sigmar.T,(Ur.T @ Xprime @ VTr.T
     ).T).T # Step 2
     Lambda, W = jnp.linalg.eig(Atilde) # Step 3
@@ -116,12 +121,12 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             b_low = b[mask]
             omega_low = omega[mask]
 
-            # funcs.append(
-            #     lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
-            #         f(start, stop, t) *
-            #         (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
-            # )
-
+            funcs.append(
+                lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
+                    f(start, stop, t) *
+                    (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
+            )
+            """
             funcs.append(
                 lambda t, start=ts[ts_idx[j]], stop=ts[min(ts_idx[j+1], len(ts)-1)], 
                     Phi_low=Phi_low, b_low=b_low, omega_low=omega_low:
@@ -131,7 +136,8 @@ def mrDMD(X, Y, M, L, f, dt, ts):
                     0.0
                 )
             )
-            print(funcs[-1](1))
+            """
+            #print(funcs[-1](1))
 
             # Reconstruct X using only the high frequency modes for each time bin
             high_mask = ~mask
@@ -168,9 +174,9 @@ if __name__ == "__main__":
     t_max = 20
 
 
-    # g = lambda x,t : 1*jnp.cos(x + t)
+    g = lambda x,t : 1*jnp.cos(x + t)
     seed = 5
-    g = sum_of_sines(seed, 10)
+    #g = sum_of_sines(seed, 10)
 
     def f(start, stop, t):
         # This uses JAX logic to return 0 or 1 without Python if/else
