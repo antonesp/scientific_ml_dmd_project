@@ -4,17 +4,12 @@ import jax.numpy as jnp
 import numpy as np
 from time import sleep
 
-def DMD(X,Xprime, r, energy_threshold=0.999):
+def DMD(X,Xprime,r):
     U, Sigma, VT = jnp.linalg.svd(X,full_matrices=0) # Step 1
-    # Choose r adaptively based on singular value energy (prevents nans from forming)
-    total_energy = jnp.sum(Sigma**2)
-    cumulative_energy = jnp.cumsum(Sigma**2) / total_energy
-    r_adaptive = int(jnp.searchsorted(cumulative_energy, energy_threshold)) + 1
-    r_adaptive = min(r, r_adaptive, len(Sigma))  # never exceed requested r
 
-    Ur = U[:,:r_adaptive]
-    Sigmar = jnp.diag(Sigma[:r_adaptive])
-    VTr = VT[:r_adaptive,:]
+    Ur = U[:,:r]
+    Sigmar = jnp.diag(Sigma[:r])
+    VTr = VT[:r,:]
     Atilde = jnp.linalg.solve(Sigmar.T,(Ur.T @ Xprime @ VTr.T
     ).T).T # Step 2
     Lambda, W = jnp.linalg.eig(Atilde) # Step 3
@@ -105,7 +100,6 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             
             # Compute DMD for each time bin
             Phi, Lambda, b = DMD(X_bin, Y_bin, r)
-            print(Lambda)
 
             if X_bin.shape[0] < 2:
                 X_temps.append(X_bin)  # passthrough, shape (n_spatial, n_time)
@@ -113,10 +107,7 @@ def mrDMD(X, Y, M, L, f, dt, ts):
 
             # Convert the eigenvalues and find the low frequency modes
             window_duration = (ts_idx[j+1] - ts_idx[j]) * dt
-
-            omega = jnp.log(Lambda +0j)/dt
-
-
+            omega = jnp.log(Lambda)/dt
             freq = jnp.abs(jnp.imag(omega))/(2*jnp.pi)
             mask = freq <= 1/window_duration
 
@@ -130,24 +121,7 @@ def mrDMD(X, Y, M, L, f, dt, ts):
                     f(start, stop, t) *
                     (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
             )
-
-            funcs.append(
-                lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
-                    f(start, stop, t) *
-                    (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
-            )
-            """
-            funcs.append(
-                lambda t, start=ts[ts_idx[j]], stop=ts[min(ts_idx[j+1], len(ts)-1)], 
-                    Phi_low=Phi_low, b_low=b_low, omega_low=omega_low:
-                jnp.where(
-                    (t >= start) & (t <= stop),
-                    jnp.real(Phi_low @ (b_low * jnp.exp(omega_low * (t - start)))),
-                    0.0
-                )
-            )
-            """
-            #print(funcs[-1](1))
+            print(funcs[-1](5))
 
             # Reconstruct X using only the high frequency modes for each time bin
             high_mask = ~mask
@@ -176,40 +150,36 @@ def mrDMD(X, Y, M, L, f, dt, ts):
 
 if __name__ == "__main__":
 
-    from mr_dmd.helper_functions import sum_of_sines
-
     t_steps = 200
     n_steps = 20
-    r = 6
+    r = 30
     t_max = 20
 
 
     g = lambda x,t : 1*jnp.cos(x + t)
-    seed = 5
-    #g = sum_of_sines(seed, 10)
-
     def f(start, stop, t):
-        # This uses JAX logic to return 0 or 1 without Python if/else
-        return jnp.where((t >= start) & (t <= stop), 1.0, 0.0)
+        if (t < start) or (t > stop): return 0
+        else: return 1
 
     x = jnp.linspace(0, 2*jnp.pi, n_steps)
     x_precise = jnp.linspace(0, 2*jnp.pi, 500)
     t = jnp.linspace(0, t_max, t_steps)
     
     
-  
+
     raw = (g(x[:, None],t[None, :]))
+
     X = raw[:,:-1]
     X_prime = raw[:, 1:]
 
     # Run the DMD
-    L = 3
+    L = 4
     M = r
     dt = t[1] - t[0]
     fun = mrDMD(X,X_prime,M, L, f, dt, t)
 
     t1 = 1
-    t2 = 17    
+    t2 = 6    
 
     f_1 = fun(t1)
     f_10 = fun(t2)
@@ -221,13 +191,11 @@ if __name__ == "__main__":
     #plt.imshow(raw)
     #plt.show()
     print("Plotting")
-    print(f_1)
     print(f_10)
     
-    
-    plt.plot(x_precise, jnp.real(g_1), label = f"true t={t1}")
-    plt.scatter(x, jnp.real(f_1), label = f"reconstruction t={t1}", marker="x")
-    plt.plot(x_precise, jnp.real(g_10), label = f"true t={t2}")
+    #plt.plot(x_precise, jnp.real(g_1), label = f"true t={t1}")
+    #plt.scatter(x, jnp.real(f_1), label = f"reconstruction t={t1}", marker="x")
+    #plt.plot(x_precise, jnp.real(g_10), label = f"true t={t2}")
     plt.scatter(x, jnp.real(f_10), label = f"reconstruction t={t2}", marker="x")
     plt.legend()
     plt.show()
