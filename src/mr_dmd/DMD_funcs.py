@@ -100,6 +100,7 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             
             # Compute DMD for each time bin
             Phi, Lambda, b = DMD(X_bin, Y_bin, r)
+            print(Lambda)
 
             if X_bin.shape[0] < 2:
                 X_temps.append(X_bin)  # passthrough, shape (n_spatial, n_time)
@@ -107,7 +108,10 @@ def mrDMD(X, Y, M, L, f, dt, ts):
 
             # Convert the eigenvalues and find the low frequency modes
             window_duration = (ts_idx[j+1] - ts_idx[j]) * dt
-            omega = jnp.log(Lambda)/dt
+
+            omega = jnp.log(Lambda +0j)/dt
+
+
             freq = jnp.abs(jnp.imag(omega))/(2*jnp.pi)
             mask = freq <= 1/window_duration
 
@@ -116,21 +120,21 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             b_low = b[mask]
             omega_low = omega[mask]
 
-            # funcs.append(
-            #     lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
-            #         f(start, stop, t) *
-            #         (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
-            # )
-
             funcs.append(
-                lambda t, start=ts[ts_idx[j]], stop=ts[min(ts_idx[j+1], len(ts)-1)], 
-                    Phi_low=Phi_low, b_low=b_low, omega_low=omega_low:
-                jnp.where(
-                    (t >= start) & (t <= stop),
-                    jnp.real(Phi_low @ (b_low * jnp.exp(omega_low * (t - start)))),
-                    0.0
-                )
+                lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
+                    f(start, stop, t) *
+                    (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
             )
+
+            # funcs.append(
+            #     lambda t, start=ts[ts_idx[j]], stop=ts[min(ts_idx[j+1], len(ts)-1)], 
+            #         Phi_low=Phi_low, b_low=b_low, omega_low=omega_low:
+            #     jnp.where(
+            #         (t >= start) & (t <= stop),
+            #         jnp.real(Phi_low @ (b_low * jnp.exp(omega_low * (t - start)))),
+            #         0.0
+            #     )
+            # )
             print(funcs[-1](1))
 
             # Reconstruct X using only the high frequency modes for each time bin
@@ -164,7 +168,7 @@ if __name__ == "__main__":
 
     t_steps = 200
     n_steps = 20
-    r = 30
+    r = 6
     t_max = 20
 
 
@@ -187,7 +191,7 @@ if __name__ == "__main__":
     X_prime = raw[:, 1:]
 
     # Run the DMD
-    L = 4
+    L = 3
     M = r
     dt = t[1] - t[0]
     fun = mrDMD(X,X_prime,M, L, f, dt, t)
