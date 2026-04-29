@@ -2,22 +2,28 @@ import scipy
 from matplotlib import pyplot as plt
 import jax.numpy as jnp
 
+import jax.random as random
 
-grid = jnp.linspace(0, 10, 10)[None,:]
+from mr_dmd.helper_functions import sum_of_sines
 
-ts = jnp.arange(15)[:,None]
-
-omegas = [3, 8]
-funcs = []
-
-
-for omega in omegas:
-
-    funcs.append(lambda t, w= omega: jnp.cos(w*t*grid))
+t_steps = 200
+n_steps = 20
+r = 30
+t_max = 20
 
 
-x = lambda t: sum(f(t) for f in funcs)
+# g = lambda x,t : 1*jnp.cos(x + t)
+seed = 5
+g = sum_of_sines(seed, 10)
+
+def f(start, stop, t):
+    if (t < start) or (t > stop): return 0
+    else: return 1
+
+x = jnp.linspace(0, 2*jnp.pi, n_steps)
+x_precise = jnp.linspace(0, 2*jnp.pi, 500)
+t = jnp.linspace(0, t_max, t_steps)
 
 
-plt.plot(grid[0],x(1)[0])
-plt.show()
+
+raw = (g(x[:, None],t[None, :]))
