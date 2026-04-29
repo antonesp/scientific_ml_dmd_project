@@ -1,9 +1,11 @@
 from scipy.stats import norm
 from scipy.stats import t as t_dist
 import numpy as np
+import jax.random as random
+import jax.numpy as jnp
 
 
-def Schroeder_sines(n, t,seed = 1, amplitude = 0.1, max_power = 100):
+def Schroeder_sines(n, x, t,seed = 1, amplitude = 0.1, max_power = 100):
     # Frequencies and Amplitudes (Uniform for flat power spectrum)
     
     omega = amplitude * norm.rvs(0,4,random_state= seed*2, size= n).reshape(n, 1)
@@ -15,7 +17,7 @@ def Schroeder_sines(n, t,seed = 1, amplitude = 0.1, max_power = 100):
 
 
     # Vectorized sum
-    u = np.sum(A * np.sin(omega * t + phi), axis=0)
+    u = np.sum(A * np.sin(omega * t + phi*x), axis=0)
 
     u = u - np.min(u)
     u_max = np.max(u)
@@ -23,3 +25,23 @@ def Schroeder_sines(n, t,seed = 1, amplitude = 0.1, max_power = 100):
     if u_max > 0:
         u = u / u_max
     return u*max_power
+
+
+
+def sum_of_sines(seed, n):
+
+    key = random.key(seed)
+    key, subkey = random.split(key)
+
+    omegas = 5*random.normal(subkey, shape=(n,))
+    amplitudes = random.normal(key, shape=(n,))
+
+    funcs = []
+
+    for i in range(n):
+
+        funcs.append(lambda t, x, w= omegas[i], z = amplitudes[i]: z*jnp.sin(w*t + x))
+
+
+    f = lambda t, x: sum(f(t,x) for f in funcs)
+    return f
