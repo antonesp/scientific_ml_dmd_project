@@ -116,12 +116,22 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             b_low = b[mask]
             omega_low = omega[mask]
 
+            # funcs.append(
+            #     lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
+            #         f(start, stop, t) *
+            #         (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
+            # )
+
             funcs.append(
-                lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
-                    f(start, stop, t) *
-                    (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
+                lambda t, start=ts[ts_idx[j]], stop=ts[min(ts_idx[j+1], len(ts)-1)], 
+                    Phi_low=Phi_low, b_low=b_low, omega_low=omega_low:
+                jnp.where(
+                    (t >= start) & (t <= stop),
+                    jnp.real(Phi_low @ (b_low * jnp.exp(omega_low * (t - start)))),
+                    0.0
+                )
             )
-            print(funcs[-1](5))
+            print(funcs[-1](1))
 
             # Reconstruct X using only the high frequency modes for each time bin
             high_mask = ~mask
@@ -150,25 +160,29 @@ def mrDMD(X, Y, M, L, f, dt, ts):
 
 if __name__ == "__main__":
 
+    from mr_dmd.helper_functions import sum_of_sines
+
     t_steps = 200
     n_steps = 20
     r = 30
     t_max = 20
 
 
-    g = lambda x,t : 1*jnp.cos(x + t)
+    # g = lambda x,t : 1*jnp.cos(x + t)
+    seed = 5
+    g = sum_of_sines(seed, 10)
+
     def f(start, stop, t):
-        if (t < start) or (t > stop): return 0
-        else: return 1
+        # This uses JAX logic to return 0 or 1 without Python if/else
+        return jnp.where((t >= start) & (t <= stop), 1.0, 0.0)
 
     x = jnp.linspace(0, 2*jnp.pi, n_steps)
     x_precise = jnp.linspace(0, 2*jnp.pi, 500)
     t = jnp.linspace(0, t_max, t_steps)
     
     
-
+  
     raw = (g(x[:, None],t[None, :]))
-
     X = raw[:,:-1]
     X_prime = raw[:, 1:]
 
@@ -179,7 +193,7 @@ if __name__ == "__main__":
     fun = mrDMD(X,X_prime,M, L, f, dt, t)
 
     t1 = 1
-    t2 = 6    
+    t2 = 17    
 
     f_1 = fun(t1)
     f_10 = fun(t2)
@@ -191,11 +205,13 @@ if __name__ == "__main__":
     #plt.imshow(raw)
     #plt.show()
     print("Plotting")
+    print(f_1)
     print(f_10)
     
-    #plt.plot(x_precise, jnp.real(g_1), label = f"true t={t1}")
-    #plt.scatter(x, jnp.real(f_1), label = f"reconstruction t={t1}", marker="x")
-    #plt.plot(x_precise, jnp.real(g_10), label = f"true t={t2}")
+    
+    plt.plot(x_precise, jnp.real(g_1), label = f"true t={t1}")
+    plt.scatter(x, jnp.real(f_1), label = f"reconstruction t={t1}", marker="x")
+    plt.plot(x_precise, jnp.real(g_10), label = f"true t={t2}")
     plt.scatter(x, jnp.real(f_10), label = f"reconstruction t={t2}", marker="x")
     plt.legend()
     plt.show()
