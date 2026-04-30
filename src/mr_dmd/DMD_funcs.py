@@ -174,9 +174,9 @@ if __name__ == "__main__":
     t_max = 20
 
 
-    g = lambda x,t : 1*jnp.cos(x + t)
+    # g = lambda x,t : 1*jnp.cos(x + t)
     seed = 5
-    #g = sum_of_sines(seed, 10)
+    g = sum_of_sines(seed, 10)
 
     def f(start, stop, t):
         # This uses JAX logic to return 0 or 1 without Python if/else
@@ -211,8 +211,7 @@ if __name__ == "__main__":
     #plt.imshow(raw)
     #plt.show()
     print("Plotting")
-    print(f_1)
-    print(f_10)
+ 
     
     
     plt.plot(x_precise, jnp.real(g_1), label = f"true t={t1}")
