@@ -83,10 +83,11 @@ def mrDMD(X, Y, M, L, f, dt, ts):
     T = ts.shape[0]                                                 # Number of time steps
    
     funcs = []
+    Phis = []
     for l in range(L):
         print(f"Layer: {l+1} of {L}")
         J = 2**l
-        r = jnp.maximum(1, M//J)                                    # Ensure that r > 0                                      # Size of each time bin
+        r = M                                    # Ensure that r > 0                                      # Size of each time bin
         ts_idx = jnp.linspace(0, X.shape[1], J+1, dtype=int)        # Splitting indecies
 
         if X.shape[1] < r:
@@ -114,12 +115,19 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             window_duration = (ts_idx[j+1] - ts_idx[j]) * dt
             omega = jnp.log(Lambda)/dt
             freq = jnp.abs(jnp.imag(omega))/(2*jnp.pi)
-            mask = freq <= 1/window_duration
+            mask = freq <= 10/window_duration
+            
+            if mask.sum() == 0:         
+                X_temps.append(X_bin)   # Continue if nothing is removed
+                continue
 
             # Extract low frequency modes to the mrDMD function
             Phi_low = Phi[:, mask]
             b_low = b[mask]
             omega_low = omega[mask]
+            print(f"Saving {Phi_low.shape[1]} modes in (j={j+1}, l={l+1})")
+            for i in range(Phi_low.shape[1]):
+                Phis.append(Phi_low[:, i][:, None])
 
             funcs.append(
                 lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
@@ -161,7 +169,7 @@ def mrDMD(X, Y, M, L, f, dt, ts):
         X = X_full[:, :-1]
 
     # Sum all the functions together
-    return lambda t: sum(g(t) for g in funcs)
+    return Phis, lambda t: sum(g(t) for g in funcs)
 
 
 if __name__ == "__main__":
@@ -196,7 +204,8 @@ if __name__ == "__main__":
     L = 4
     M = r
     dt = t[1] - t[0]
-    fun = mrDMD(X,X_prime,M, L, f, dt, t)
+    Phis, fun = mrDMD(X,X_prime,M, L, f, dt, t)
+    #Phi_DMD = DMD(X, X_prime, r)
 
     t1 = 1
     t2 = 17    
@@ -206,7 +215,11 @@ if __name__ == "__main__":
     g_1 = g(x_precise, t1)
     g_10 = g(x_precise, t2)
 
-
+    fig, ax = plt.subplots(len(Phis), 1)
+    for i, phi in enumerate(Phis):
+        print(phi.shape)
+        ax[i].plot(jnp.real(phi))
+    plt.show()
 
     #plt.imshow(raw)
     #plt.show()
