@@ -30,10 +30,10 @@ def DMD(X,Xprime, r, energy_threshold=0.999):
     return Phi, Lambda, b
 
 
-t_steps = 500
+t_steps = 200
 n_steps = 20
 r = 30
-t_max = 128
+t_max = 120
 
 
 dt =  t_max / t_steps
@@ -117,7 +117,7 @@ L = 3
 Phis_DMD, Lambda, b = DMD(X_hankel, Xprime_hankel, 8, energy_threshold=2)
 Phis, func, time_funcs = mrDMD(X_hankel, Xprime_hankel, M, L, f, dt, ts)
 
-
+print(jnp.max(ts))
 all_trajectories = []
 for tf in time_funcs:
     # Evaluate the lambda function for the entire time array
@@ -127,13 +127,18 @@ for tf in time_funcs:
 
 all_modes_matrix = jnp.vstack(all_trajectories)
 
-plt.figure(figsize=(10, 6))
-# Plot the real part of all discovered trajectories
-# We use .real because DMD produces complex conjugate pairs for oscillations
-plt.plot(ts, all_modes_matrix.real.T, alpha=0.5)
-plt.title("All Rediscovered Temporal Dynamics (mrDMD)")
-plt.xlabel("Time")
-plt.ylabel("Amplitude")
+n_modes = all_modes_matrix.shape[0]
+fig, axes = plt.subplots(n_modes, 1, figsize=(10, 2.5 * n_modes), sharex=True)
+if n_modes == 1:
+    axes = [axes]
+
+for i, ax in enumerate(axes):
+    ax.plot(ts, all_modes_matrix.real[i], alpha=0.7)
+    ax.set_title(f"Mode {i + 1}")
+    ax.set_ylabel("Amplitude")
+
+axes[-1].set_xlabel("Time")
+plt.tight_layout()
 plt.show()
 
 # k = jnp.arange(len(ts))  # [0, 1, 2, ..., 99]

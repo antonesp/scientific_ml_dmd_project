@@ -151,8 +151,6 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
             # Convert the eigenvalues and find the low frequency modes
             window_duration = (ts_idx[j+1] - ts_idx[j]) * dt
             omega = jnp.log(Lambda)/dt
-            print("Omega", omega)
-            print("Lambda", Lambda)
             freq = jnp.abs(jnp.imag(omega))/(2*jnp.pi)
             mask = freq <= 1/(window_duration)
             
@@ -176,7 +174,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
             time_funcs.append(
                 lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], b_low=b_low, omega_low=omega_low, f = f:
                     f(start, stop, t) *
-                    ((b_low * jnp.exp(omega_low * (t-start)))))
+                    (b_low[:, None] * jnp.exp(omega_low[:, None] * (t - start))))
             """
             funcs.append(
                 lambda t, start=ts[ts_idx[j]], stop=ts[min(ts_idx[j+1], len(ts)-1)], 
