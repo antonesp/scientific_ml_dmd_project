@@ -1,14 +1,14 @@
 import scipy
 from matplotlib import pyplot as plt
 import jax.numpy as jnp
-import numpy as np
-from time import sleep
+
+
 
 def DMD(X,Xprime, r, energy_threshold=0.999):
     U, Sigma, VT = jnp.linalg.svd(X,full_matrices=False) # Step 1
     # Choose r adaptively based on singular value energy (prevents nans from forming)
-    total_energy = jnp.sum(Sigma**2)
-    cumulative_energy = jnp.cumsum(Sigma**2) / total_energy
+    total_energy = jnp.sum(Sigma)
+    cumulative_energy = jnp.cumsum(Sigma) / total_energy
     r_adaptive = int(jnp.searchsorted(cumulative_energy, energy_threshold)) + 1
     r_adaptive = min(r, r_adaptive, len(Sigma))  # never exceed requested r
 
@@ -63,48 +63,6 @@ def DMD_Allan(X,Xprime, r, energy_threshold=0.999):
     return Phi, Lambda, b
 
 
-def fbDMD(X,Y, r):
-
-    U,Sigma,VT = jnp.linalg.svd(X, full_matrices = 0) # Step 1
-
-    Ur = U[:,:r]
-    Sigmar = jnp.diag(Sigma[:r])
-    VTr = VT[:r,:]
-
-    U_rstar = jnp.conj(Ur.T)
-    X_tilde = U_rstar @ X
-    Y_tilde = U_rstar @ Y
-
-
-    U_X, Sigma_X, Vstar_X = jnp.linalg.svd(X_tilde, full_matrices=0) 
-    U_Y, Sigma_Y, Vstar_Y = jnp.linalg.svd(Y_tilde, full_matrices=0) 
-
-    V_X = jnp.conj(Vstar_X.T)
-    V_Y = jnp.conj(Vstar_Y.T)
-
-  
-    Sigma_X_inv = jnp.diag(1 / Sigma_X)
-    Sigma_Y_inv = jnp.diag(1 / Sigma_Y)
-
-    K_f_tilde = jnp.conj(U_X.T) @ Y_tilde @ V_X @ Sigma_X_inv
-    K_b_tilde = jnp.conj(U_Y.T) @ X_tilde @ V_Y @ Sigma_Y_inv
-
-    S_f = Y_tilde @ V_X @ Sigma_X_inv
-    S_b = X_tilde @ V_Y @ Sigma_Y_inv
-
-   
-    K_f = S_f @ K_f_tilde @ jnp.linalg.pinv(S_f)
-    K_b = S_b @ K_b_tilde @ jnp.linalg.pinv(S_b)
-
-    K_tilde = scipy.linalg.sqrtm(K_f @ jnp.linalg.inv(K_b))
-
-    Lambda, W = jnp.linalg.eig(K_tilde)
-    Lambda = jnp.diag(Lambda)
-    Phi = Y @ jnp.linalg.solve(Sigmar.T,VTr).T @ W
-
-    return Phi, Lambda
-
-
 def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
     """
     Multi resolution DMD function:
@@ -116,7 +74,6 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
     - dt: Time between datapoints
     - ts: The timesteps
     """
-    T = ts.shape[0]                                                 # Number of time steps
    
     funcs = []
     time_funcs = []
@@ -132,6 +89,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
             break
         
         X_temps = [] 
+        Y_temps = []
         for j in range(J):
 
             # Compute time segments
@@ -146,16 +104,21 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
 
             if X_bin.shape[0] < 2:
                 X_temps.append(X_bin)  # passthrough, shape (n_spatial, n_time)
+                Y_temps.append(Y_bin)
                 continue
 
             # Convert the eigenvalues and find the low frequency modes
-            window_duration = (ts_idx[j+1] - ts_idx[j]) * dt
+            window_duration = jnp.abs((ts[ts_idx[j+1]] - ts[ts_idx[j]]))/12
             omega = jnp.log(Lambda)/dt
+            #print("Omega", omega)
+            #print("Lambda", Lambda)
             freq = jnp.abs(jnp.imag(omega))/(2*jnp.pi)
-            mask = freq <= 1/(window_duration)
+            mask = freq <= 1/(2*window_duration)
+
             
             if mask.sum() == 0:         
                 X_temps.append(X_bin)   # Continue if nothing is removed
+                Y_temps.append(Y_bin)
                 continue
 
             # Extract low frequency modes to the mrDMD function
@@ -189,25 +152,21 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
             #print(funcs[-1](1))
 
             # Reconstruct X using only the high frequency modes for each time bin
-            high_mask = ~mask
-            if jnp.any(high_mask):
-                Phi_high = Phi[:, high_mask]
-                b_high = b[high_mask][:, None]
-                omega_high = omega[high_mask][:, None]
-                exp_term = jnp.exp(omega_high* t_local)
-                X_temp = Phi_high @ (b_high * exp_term)
-            else:
-                X_temp = jnp.zeros((X.shape[0], len(t_segment)))
+          
+            X_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_segment))*b_low[:, None])
+            Y_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, (t_segment+dt)))*b_low[:, None])
+
+            X_temp = X_bin - X_low
+            Y_temp = Y_bin - Y_low
 
             X_temps.append(X_temp)
-            print(X_temp.shape)
+            Y_temps.append(Y_temp)
 
             
         # Combine X_temp to make new X and Y   
-        X_full = jnp.concatenate(X_temps, axis = 1)
-        ts = ts[:X_full.shape[1]]
-        Y = X_full[:, 1:]
-        X = X_full[:, :-1]
+        X = jnp.concatenate(X_temps, axis = 1)
+        Y = jnp.concatenate(Y_temps, axis = 1)
+        ts = ts[:X.shape[1]]
 
     # Sum all the functions together
     return Phis, lambda t: sum(g(t) for g in funcs), time_funcs
@@ -215,11 +174,12 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
 
 if __name__ == "__main__":
 
-    from mr_dmd.helper_functions import sum_of_sines
+    from mr_dmd.helper_functions import sum_of_sines, make_wavelet_window, indicator
+  
 
     t_steps = 200
     n_steps = 20
-    r = 10
+    r = 2
     t_max = 20
 
 
@@ -227,9 +187,11 @@ if __name__ == "__main__":
     seed = 5
     g = sum_of_sines(seed, 10)
 
-    def f(start, stop, t):
-        # This uses JAX logic to return 0 or 1 without Python if/else
-        return jnp.where((t >= start) & (t <= stop), 1.0, 0.0)
+
+    # Mexican hat
+    f = make_wavelet_window('gaus2')
+    f = indicator
+ 
 
     x = jnp.linspace(0, 2*jnp.pi, n_steps)
     x_precise = jnp.linspace(0, 2*jnp.pi, 500)
@@ -259,7 +221,6 @@ if __name__ == "__main__":
 
     fig, ax = plt.subplots(len(Phis), 1)
     for i, phi in enumerate(Phis):
-        print(phi.shape)
         ax[i].plot(jnp.real(phi))
     plt.show()
 
