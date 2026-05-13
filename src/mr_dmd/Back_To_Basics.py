@@ -33,7 +33,7 @@ def DMD(X,Xprime, r, energy_threshold=0.999):
 t_steps = 200
 n_steps = 20
 r = 30
-t_max = 120
+t_max = 128
 
 
 dt =  t_max / t_steps
@@ -107,22 +107,53 @@ def create_hankel_matrix(data, rows):
 
 
 H = create_hankel_matrix(data_flat, rows=10) # 2 is enough for a simple cosine
+print("Shape of Hankel matrix",H.shape)
+print("Shape of data flat",data_flat.shape)
+
 X_hankel = H[:, :-1]
 Xprime_hankel = H[:, 1:]
-
+spatial_size = len(xs)*len(ys)
 
 M = 8
 L = 3
+r = 8
 
-Phis_DMD, Lambda, b = DMD(X_hankel, Xprime_hankel, 8, energy_threshold=2)
+Phis_DMD, Lambda, b = DMD(X_hankel, Xprime_hankel, r, energy_threshold=2)
 Phis, func, time_funcs = mrDMD(X_hankel, Xprime_hankel, M, L, f, dt, ts)
 
-print(jnp.max(ts))
+mrDMD_reconstruct = jnp.zeros_like(data_flat)
+
+for i in range(t_steps):
+    X_at_step = func(ts[i])[:spatial_size]
+    mrDMD_reconstruct = mrDMD_reconstruct.at[:, i].set(X_at_step)
+
+
+print(mrDMD_reconstruct[0,10])
+k = jnp.arange(200) 
+v_lambda = Lambda[:, None] ** k
+dynamics = b[:, None] * v_lambda
+
+X_rec = jnp.dot(Phis_DMD, dynamics)
+X_rec_real = jnp.real(X_rec)
+
+
+print(X_rec_real.shape)
+
+# print("Normal DMD square error ",jnp.mean((X_rec_real[:spatial_size]-data_flat)**2, axis=0))
+# print("mrDMD square errpor ", jnp.mean((mrDMD_reconstruct - data_flat)**2, axis= 0))
+
+plt.plot(ts, jnp.mean((X_rec_real[:spatial_size]-data_flat)**2, axis=0), label = "Normal DMD")
+plt.plot(ts, jnp.mean((mrDMD_reconstruct - data_flat)**2, axis= 0), label = "mrDMD")
+plt.legend()
+plt.show()
+
+
 all_trajectories = []
 for tf in time_funcs:
     # Evaluate the lambda function for the entire time array
     # tf(t_eval) returns (r_low, t_steps)
     traj = tf(ts)
+
     all_trajectories.append(traj)
 
 all_modes_matrix = jnp.vstack(all_trajectories)
@@ -137,28 +168,59 @@ for i, ax in enumerate(axes):
     ax.set_title(f"Mode {i + 1}")
     ax.set_ylabel("Amplitude")
 
+    print(all_modes_matrix.real[i])
+
 axes[-1].set_xlabel("Time")
 plt.tight_layout()
-plt.show()
+# plt.show()
 
-# k = jnp.arange(len(ts))  # [0, 1, 2, ..., 99]
+k = jnp.arange(len(ts))  # [0, 1, 2, ..., 99]
 
-# all_time_functions = b[:, None] * (Lambda[:, None] ** k)
+all_time_functions = b[:, None] * (Lambda[:, None] ** k)
 
 
-# reconstructed_g_all = jnp.real(all_time_functions)
+reconstructed_g_all = jnp.real(all_time_functions)
 
-# fig, axes = plt.subplots(reconstructed_g_all.shape[0], 1, figsize=(10, 2.5 * reconstructed_g_all.shape[0]), sharex=True)
-# if reconstructed_g_all.shape[0] == 1:
-#     axes = [axes]
 
-# for i, ax in enumerate(axes):
-#     ax.plot(np.asarray(k), np.asarray(reconstructed_g_all[i]))
-#     ax.set_title(f"Reconstructed mode {i + 1}")
-#     ax.set_ylabel("Amplitude")
 
-# axes[-1].set_xlabel("Time index")
-# plt.tight_layout()
+fig, axes = plt.subplots(reconstructed_g_all.shape[0], 1, figsize=(10, 2.5 * reconstructed_g_all.shape[0]), sharex=True)
+if reconstructed_g_all.shape[0] == 1:
+    axes = [axes]
+
+for i, ax in enumerate(axes):
+    ax.plot(np.asarray(k), np.asarray(reconstructed_g_all[i]))
+    ax.set_title(f"Reconstructed mode {i + 1}")
+    ax.set_ylabel("Amplitude")
+
+axes[-1].set_xlabel("Time index")
+plt.tight_layout()
 # plt.show()
 
 
+
+num_phis = len(Phis)
+fig, ax = plt.subplots(1, num_phis, figsize=(5 * num_phis, 5), squeeze=False)
+
+for i, phi in enumerate(Phis):
+    phi_grid = jnp.real(phi[:spatial_size, 0]).reshape(len(ys), len(xs))
+    im = ax[0, i].contourf(X, Y, phi_grid.T, levels=20, cmap="hot")
+    ax[0, i].set_title(f"Phi {i + 1}")
+    ax[0, i].set_xlabel("x")
+    ax[0, i].set_ylabel("y")
+
+plt.tight_layout()
+# plt.show()
+
+
+num_phis_dmd = Phis_DMD.shape[1]
+fig, ax = plt.subplots(1, num_phis_dmd, figsize=(5 * num_phis_dmd, 5), squeeze=False)
+
+for i in range(num_phis_dmd):
+    phi_grid = jnp.real(Phis_DMD[:spatial_size, i]).reshape(len(ys), len(xs))
+    im = ax[0, i].contourf(X, Y, phi_grid.T, levels=20, cmap="hot")
+    ax[0, i].set_title(f"DMD Phi {i + 1}")
+    ax[0, i].set_xlabel("x")
+    ax[0, i].set_ylabel("y")
+
+plt.tight_layout()
+# plt.show()
