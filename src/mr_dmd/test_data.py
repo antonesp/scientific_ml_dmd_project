@@ -52,6 +52,7 @@ if __name__ == "__main__":
     
     fig, ax = plt.subplots(len(Phis), 1)
     for i , phi in enumerate(Phis):
+        print(phi.shape)
         full_phi = jnp.full(mask.shape, jnp.nan)
         full_phi = full_phi.at[~mask].set(phi[:, 0])
         ax[i].imshow(jnp.real(full_phi.reshape(180, 360)), cmap = "jet_r")

@@ -5,7 +5,7 @@ import numpy as np
 from time import sleep
 
 def DMD(X,Xprime, r, energy_threshold=0.999):
-    U, Sigma, VT = jnp.linalg.svd(X,full_matrices=0) # Step 1
+    U, Sigma, VT = jnp.linalg.svd(X,full_matrices=False) # Step 1
     # Choose r adaptively based on singular value energy (prevents nans from forming)
     total_energy = jnp.sum(Sigma**2)
     cumulative_energy = jnp.cumsum(Sigma**2) / total_energy
@@ -14,15 +14,51 @@ def DMD(X,Xprime, r, energy_threshold=0.999):
 
     Ur = U[:,:r_adaptive]
     Sigmar = jnp.diag(Sigma[:r_adaptive])
-    VTr = VT[:r_adaptive,:]
-    Atilde = jnp.linalg.solve(Sigmar.T,(Ur.T @ Xprime @ VTr.T
-    ).T).T # Step 2
+
+    Vr = VT[:r_adaptive,:].conj().T
+
+    # Atilde = jnp.linalg.multi_dot([Ur.T, Xprime, Vr, jnp.linalg.inv(Sigmar)])
+    Atilde = Ur.conj().T @ Xprime @ Vr @  jnp.linalg.inv(Sigmar)
+
+    # Atilde = jnp.linalg.solve(Sigmar.T,(Ur.T @ Xprime @ VTr.T
+    # ).T).T # Step 2
+
     Lambda, W = jnp.linalg.eig(Atilde) # Step 3
+    
+    # idx = Lambda.real.argsort()[::-1]
     #Lambda = jnp.diag(Lambda)
     # Step 4
-    Phi = Xprime @ jnp.linalg.solve(Sigmar.T,VTr).T @ W
-    alpha1 = Sigmar @ VTr[:,0]
-    b = jnp.linalg.solve(W @ jnp.diag(Lambda),alpha1)
+    # Phi = Xprime @ jnp.linalg.solve(Sigmar.T,VTr).T @ W
+    Phi = Xprime @ Vr @ jnp.linalg.inv(Sigmar) @ W
+    # Phi = jnp.linalg.multi_dot([Xprime, Vr, jnp.linalg.inv(Sigmar), W])
+
+    alpha1 = Sigmar @ Vr[0, :].conj().T
+
+    b = jnp.linalg.lstsq(W @ jnp.diag(Lambda),alpha1, rcond= None)[0]
+
+    return Phi, Lambda, b
+
+
+def DMD_Allan(X,Xprime, r, energy_threshold=0.999):
+    U, Sigma, VT = jnp.linalg.svd(X,full_matrices=False) # Step 1
+    # Choose r adaptively based on singular value energy (prevents nans from forming)
+    total_energy = jnp.sum(Sigma**2)
+    cumulative_energy = jnp.cumsum(Sigma**2) / total_energy
+    r_adaptive = int(jnp.searchsorted(cumulative_energy, energy_threshold)) + 1
+    r_adaptive = min(r, r_adaptive, len(Sigma))  # never exceed requested r
+
+    # Restrict the matrices to the found r-value
+    Ur = U[:,:r_adaptive]
+    Sigmar = jnp.diag(Sigma[:r_adaptive])
+    Vr = VT[:r_adaptive,:].conj().T
+
+    Atilde = Ur.conj().T @ Xprime @ Vr @  jnp.linalg.inv(Sigmar)
+
+    Lambda, W = jnp.linalg.eig(Atilde) # Step 3
+    Phi = Xprime @ Vr @ jnp.linalg.inv(Sigmar) @ W
+    alpha1 = Sigmar @ Vr[0, :].conj().T
+
+    b = jnp.linalg.lstsq(W @ jnp.diag(Lambda),alpha1, rcond= None)[0]
 
     return Phi, Lambda, b
 
@@ -69,7 +105,7 @@ def fbDMD(X,Y, r):
     return Phi, Lambda
 
 
-def mrDMD(X, Y, M, L, f, dt, ts):
+def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
     """
     Multi resolution DMD function:
     - X:  Datapoints at t_n (n_spacial, T)
@@ -83,6 +119,7 @@ def mrDMD(X, Y, M, L, f, dt, ts):
     T = ts.shape[0]                                                 # Number of time steps
    
     funcs = []
+    time_funcs = []
     Phis = []
     for l in range(L):
         print(f"Layer: {l+1} of {L}")
@@ -105,7 +142,7 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             Y_bin = Y[:, ts_idx[j]:ts_idx[j+1]]
             
             # Compute DMD for each time bin
-            Phi, Lambda, b = DMD(X_bin, Y_bin, r)
+            Phi, Lambda, b = DMD(X_bin, Y_bin, r, energy_threshold)
 
             if X_bin.shape[0] < 2:
                 X_temps.append(X_bin)  # passthrough, shape (n_spatial, n_time)
@@ -114,8 +151,10 @@ def mrDMD(X, Y, M, L, f, dt, ts):
             # Convert the eigenvalues and find the low frequency modes
             window_duration = (ts_idx[j+1] - ts_idx[j]) * dt
             omega = jnp.log(Lambda)/dt
+            print("Omega", omega)
+            print("Lambda", Lambda)
             freq = jnp.abs(jnp.imag(omega))/(2*jnp.pi)
-            mask = freq <= 10/window_duration
+            mask = freq <= 1/(window_duration)
             
             if mask.sum() == 0:         
                 X_temps.append(X_bin)   # Continue if nothing is removed
@@ -134,6 +173,10 @@ def mrDMD(X, Y, M, L, f, dt, ts):
                     f(start, stop, t) *
                     (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
             )
+            time_funcs.append(
+                lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], b_low=b_low, omega_low=omega_low, f = f:
+                    f(start, stop, t) *
+                    ((b_low * jnp.exp(omega_low * (t-start)))))
             """
             funcs.append(
                 lambda t, start=ts[ts_idx[j]], stop=ts[min(ts_idx[j+1], len(ts)-1)], 
@@ -169,7 +212,7 @@ def mrDMD(X, Y, M, L, f, dt, ts):
         X = X_full[:, :-1]
 
     # Sum all the functions together
-    return Phis, lambda t: sum(g(t) for g in funcs)
+    return Phis, lambda t: sum(g(t) for g in funcs), time_funcs
 
 
 if __name__ == "__main__":
@@ -178,7 +221,7 @@ if __name__ == "__main__":
 
     t_steps = 200
     n_steps = 20
-    r = 30
+    r = 10
     t_max = 20
 
 
@@ -204,7 +247,8 @@ if __name__ == "__main__":
     L = 4
     M = r
     dt = t[1] - t[0]
-    Phis, fun = mrDMD(X,X_prime,M, L, f, dt, t)
+    
+    Phis, fun, _ = mrDMD(X,X_prime,M, L, f, dt, t, energy_threshold= 0.999)
     #Phi_DMD = DMD(X, X_prime, r)
 
     t1 = 1
