@@ -30,7 +30,7 @@ def DMD(X,Xprime, r, energy_threshold=0.999):
     return Phi, Lambda, b
 
 
-t_steps = 200
+t_steps = 128
 n_steps = 20
 r = 30
 t_max = 128
@@ -49,8 +49,8 @@ ts = jnp.linspace(0, t_max, t_steps)
 g_1 = lambda t: jnp.full_like(t, 0.1)
 g_2 = lambda t: 2*jnp.cos(1/(64)*2*jnp.pi*t)
 
-g_3 = lambda t: 2*jnp.sin(1/16*jnp.pi*2*t) * f(0,64,t)
-g_4 = lambda t: 2*jnp.sin(1/4*t*jnp.pi*2) * f(64,96,t)
+g_3 = lambda t: 2*jnp.sin(1/32*jnp.pi*2*t) * f(0,64,t)
+g_4 = lambda t: 2*jnp.sin(1/8*t*jnp.pi*2) * f(64,96,t)
 
 
 g_funcs = [g_1, g_2, g_3, g_4]
@@ -88,7 +88,7 @@ psi4 = (np.exp(-((X + x_offset)**2 + Y**2) / (2 * sigma_lobe**2)) +
 final_func = lambda t: (
         g_1(t)[:, None, None] * psi1
         + g_2(t)[:, None, None] * psi2
-        + g_3(t)[:, None, None] * psi3
+        # + g_3(t)[:, None, None] * psi3
         + g_4(t)[:, None, None] * psi4
 )
 
@@ -97,8 +97,8 @@ raw = final_func(ts)
 data_flat = raw.T.reshape((raw.shape[1]*raw.shape[2], raw.shape[0]))
 data_flat = data_flat
 
-# input = data_flat[:, :-1]
-# output = data_flat[:,  1:]
+input = data_flat[:, :-1]
+output = data_flat[:,  1:]
 
 def create_hankel_matrix(data, rows):
     # data: (Space, Time)
@@ -114,11 +114,11 @@ X_hankel = H[:, :-1]
 Xprime_hankel = H[:, 1:]
 spatial_size = len(xs)*len(ys)
 
-M = 8
-L = 3
-r = 8
+M = 6
+L = 6
+r = 50
 
-Phis_DMD, Lambda, b = DMD(X_hankel, Xprime_hankel, r, energy_threshold=2)
+Phis_DMD, Lambda, b = DMD(X_hankel, Xprime_hankel, r, energy_threshold=0.9)
 Phis, func, time_funcs = mrDMD(X_hankel, Xprime_hankel, M, L, f, dt, ts)
 
 mrDMD_reconstruct = jnp.zeros_like(data_flat)
@@ -128,8 +128,8 @@ for i in range(t_steps):
     mrDMD_reconstruct = mrDMD_reconstruct.at[:, i].set(X_at_step)
 
 
-print(mrDMD_reconstruct[0,10])
-k = jnp.arange(200) 
+# print(mrDMD_reconstruct[0,0:17])
+k = jnp.arange(t_steps) 
 v_lambda = Lambda[:, None] ** k
 dynamics = b[:, None] * v_lambda
 
@@ -168,7 +168,7 @@ for i, ax in enumerate(axes):
     ax.set_title(f"Mode {i + 1}")
     ax.set_ylabel("Amplitude")
 
-    print(all_modes_matrix.real[i])
+
 
 axes[-1].set_xlabel("Time")
 plt.tight_layout()
