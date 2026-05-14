@@ -50,9 +50,9 @@ def sum_of_sines(seed, n):
 def indicator(start, stop, t):
     return 1.0 if start <= t <= stop else 0.0
 
-def make_wavelet_window(wavelet='morl'):
+def make_wavelet_window(wavelet='morl', level =4):
     wav = pywt.ContinuousWavelet(wavelet)
-    psi, x = wav.wavefun(level=10)  # computed once
+    psi, x = wav.wavefun(level=level)  # computed once
     psi_real = np.real(psi)
     psi_norm = psi_real / np.max(np.abs(psi_real))
 
