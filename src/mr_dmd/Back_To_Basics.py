@@ -127,7 +127,9 @@ for i in range(t_steps):
     X_at_step = func(ts[i])[:spatial_size]
     mrDMD_reconstruct = mrDMD_reconstruct.at[:, i].set(X_at_step)
 
-
+print(func(118))
+print(func(119))
+print(func(127))
 # print(mrDMD_reconstruct[0,0:17])
 k = jnp.arange(t_steps) 
 v_lambda = Lambda[:, None] ** k
@@ -141,8 +143,13 @@ print(X_rec_real.shape)
 
 # print("Normal DMD square error ",jnp.mean((X_rec_real[:spatial_size]-data_flat)**2, axis=0))
 # print("mrDMD square errpor ", jnp.mean((mrDMD_reconstruct - data_flat)**2, axis= 0))
+error_DMD = jnp.mean((X_rec_real[:spatial_size]-data_flat)**2, axis=0)
+error_mrDMD = jnp.mean((mrDMD_reconstruct - data_flat)**2, axis= 0)
 
-plt.plot(ts, jnp.mean((X_rec_real[:spatial_size]-data_flat)**2, axis=0), label = "Normal DMD")
+print("Last Points",mrDMD_reconstruct[10,110:])
+print(error_mrDMD[110:])
+
+plt.plot(ts, error_DMD, label = "Normal DMD")
 plt.plot(ts, jnp.mean((mrDMD_reconstruct - data_flat)**2, axis= 0), label = "mrDMD")
 plt.legend()
 plt.show()

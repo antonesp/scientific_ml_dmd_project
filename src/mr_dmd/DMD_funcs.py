@@ -152,13 +152,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
  
 
 
-            def robust_reconstruction(t, start=ts[ts_idx[j]], stop=ts[ts_idx[j+1]-1], P=Phi_low, b=b_low, o=omega_low):
-                # This prevents any NaN in P, b, or o from leaking into t < start or t > stop
-                return jnp.where(
-                    (t >= start) & (t <= stop),
-                    jnp.real(P @ (b * jnp.exp(o * (t - start)))),
-                    0.0
-                )
+
             
             funcs.append(robust_reconstruction)
             # funcs.append(
