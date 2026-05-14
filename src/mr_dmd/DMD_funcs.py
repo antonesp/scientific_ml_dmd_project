@@ -5,10 +5,13 @@ import jax.numpy as jnp
 
 
 def DMD(X,Xprime, r, energy_threshold=0.999):
+    if jnp.linalg.norm(X) < 1e-9:
+        return None, None, None
+    
     U, Sigma, VT = jnp.linalg.svd(X,full_matrices=False) # Step 1
     # Choose r adaptively based on singular value energy (prevents nans from forming)
-    total_energy = jnp.sum(Sigma)
-    cumulative_energy = jnp.cumsum(Sigma) / total_energy
+    total_energy = jnp.sum(Sigma**2)
+    cumulative_energy = jnp.cumsum(Sigma**2) / total_energy
     r_adaptive = int(jnp.searchsorted(cumulative_energy, energy_threshold)) + 1
     r_adaptive = min(r, r_adaptive, len(Sigma))  # never exceed requested r
 
@@ -24,43 +27,37 @@ def DMD(X,Xprime, r, energy_threshold=0.999):
     # ).T).T # Step 2
 
     Lambda, W = jnp.linalg.eig(Atilde) # Step 3
+    Lambda = jnp.where(jnp.abs(Lambda) < 1e-12, 1e-12, Lambda)
     
-    # idx = Lambda.real.argsort()[::-1]
-    #Lambda = jnp.diag(Lambda)
-    # Step 4
-    # Phi = Xprime @ jnp.linalg.solve(Sigmar.T,VTr).T @ W
+
     Phi = Xprime @ Vr @ jnp.linalg.inv(Sigmar) @ W
-    # Phi = jnp.linalg.multi_dot([Xprime, Vr, jnp.linalg.inv(Sigmar), W])
 
     alpha1 = Sigmar @ Vr[0, :].conj().T
 
-    b = jnp.linalg.lstsq(W @ jnp.diag(Lambda),alpha1, rcond= None)[0]
+    # b = jnp.linalg.lstsq(W @ jnp.diag(Lambda),alpha1, rcond= None)[0]
+    b = jnp.linalg.lstsq(Phi, X[:, 0], rcond=None)[0]
 
     return Phi, Lambda, b
 
+def DMD_safe(X, Y, r, dt, energy_threshold):
+    # 1. Energy check: if the bin is already empty, return None
+    if jnp.linalg.norm(X) < 1e-5:
+        return None, None, None, None
 
-def DMD_Allan(X,Xprime, r, energy_threshold=0.999):
-    U, Sigma, VT = jnp.linalg.svd(X,full_matrices=False) # Step 1
-    # Choose r adaptively based on singular value energy (prevents nans from forming)
-    total_energy = jnp.sum(Sigma**2)
-    cumulative_energy = jnp.cumsum(Sigma**2) / total_energy
-    r_adaptive = int(jnp.searchsorted(cumulative_energy, energy_threshold)) + 1
-    r_adaptive = min(r, r_adaptive, len(Sigma))  # never exceed requested r
+    # 2. Perform standard DMD
+    Phi, Lambda, b = DMD(X, Y, r, energy_threshold)
 
-    # Restrict the matrices to the found r-value
-    Ur = U[:,:r_adaptive]
-    Sigmar = jnp.diag(Sigma[:r_adaptive])
-    Vr = VT[:r_adaptive,:].conj().T
+    # 3. Handle Numerical Singularities
+    # Clip Lambda to prevent log(0)
+    Lambda_clipped = jnp.where(jnp.abs(Lambda) < 1e-7, 1e-7, Lambda)
+    
+    # 4. Convert to Omega and CLAMP
+    omega = jnp.log(Lambda_clipped) / dt
+    # Force Re(omega) <= 0 to prevent the explosion at t=64
+    omega = jnp.minimum(jnp.real(omega), 0.0) + 1j * jnp.imag(omega)
 
-    Atilde = Ur.conj().T @ Xprime @ Vr @  jnp.linalg.inv(Sigmar)
+    return Phi, Lambda, b, omega
 
-    Lambda, W = jnp.linalg.eig(Atilde) # Step 3
-    Phi = Xprime @ Vr @ jnp.linalg.inv(Sigmar) @ W
-    alpha1 = Sigmar @ Vr[0, :].conj().T
-
-    b = jnp.linalg.lstsq(W @ jnp.diag(Lambda),alpha1, rcond= None)[0]
-
-    return Phi, Lambda, b
 
 
 def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
@@ -74,7 +71,8 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
     - dt: Time between datapoints
     - ts: The timesteps
     """
-   
+    X_original = jnp.copy(X)
+    
     funcs = []
     time_funcs = []
     Phis = []
@@ -98,22 +96,46 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
 
             X_bin = X[:, ts_idx[j]:ts_idx[j+1]]
             Y_bin = Y[:, ts_idx[j]:ts_idx[j+1]]
+
+            bin_relative_nergy = jnp.linalg.norm(X_bin) / jnp.linalg.norm(X_original[:, ts_idx[j]:ts_idx[j+1]])
+            print("realtive energy", bin_relative_nergy)
+            if bin_relative_nergy <= 1e-1:
+                print(f"To low energy in Layer {l+1}, Bin {j+1}. Skipping.")
+                X_temps.append(jnp.zeros_like(X_bin))
+                Y_temps.append(jnp.zeros_like(Y_bin))
+                continue
+
+
             
             # Compute DMD for each time bin
-            Phi, Lambda, b = DMD(X_bin, Y_bin, r, energy_threshold)
+            Phi, Lambda, b, omega = DMD_safe(X_bin, Y_bin, r, dt, energy_threshold)
 
+
+
+            if Phi is None or jnp.any(jnp.isnan(b)) or jnp.any(jnp.isnan(omega)):
+                print(f"Numerical instability detected in Layer {l+1}, Bin {j+1}. Skipping.")
+                X_temps.append(X_bin) # Pass the data forward as residual instead
+                Y_temps.append(Y_bin)
+                continue
+
+            if Phi is None:
+                print("Phi was nan")
+                X_temps.append(X_bin)
+                Y_temps.append(Y_bin)
+                continue
+  
             if X_bin.shape[0] < 2:
                 X_temps.append(X_bin)  # passthrough, shape (n_spatial, n_time)
                 Y_temps.append(Y_bin)
                 continue
 
             # Convert the eigenvalues and find the low frequency modes
-            window_duration = jnp.abs((ts[ts_idx[j+1]] - ts[ts_idx[j]]))/12
-            omega = jnp.log(Lambda)/dt
+            window_duration = jnp.abs((ts[ts_idx[j+1]] - ts[ts_idx[j]]))
+            # omega = jnp.log(Lambda)/dt
             #print("Omega", omega)
             #print("Lambda", Lambda)
             freq = jnp.abs(jnp.imag(omega))/(2*jnp.pi)
-            mask = freq <= 1/(2*window_duration)
+            mask = freq <= 1/(window_duration)
 
             
             if mask.sum() == 0:         
@@ -125,15 +147,25 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
             Phi_low = Phi[:, mask]
             b_low = b[mask]
             omega_low = omega[mask]
-            print(f"Saving {Phi_low.shape[1]} modes in (j={j+1}, l={l+1})")
-            for i in range(Phi_low.shape[1]):
-                Phis.append(Phi_low[:, i][:, None])
+            omega_low = jnp.minimum(jnp.real(omega_low), 0.0) + 1j * jnp.imag(omega_low)
 
-            funcs.append(
-                lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
-                    f(start, stop, t) *
-                    (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
-            )
+ 
+
+
+            def robust_reconstruction(t, start=ts[ts_idx[j]], stop=ts[ts_idx[j+1]-1], P=Phi_low, b=b_low, o=omega_low):
+                # This prevents any NaN in P, b, or o from leaking into t < start or t > stop
+                return jnp.where(
+                    (t >= start) & (t <= stop),
+                    jnp.real(P @ (b * jnp.exp(o * (t - start)))),
+                    0.0
+                )
+            
+            funcs.append(robust_reconstruction)
+            # funcs.append(
+            #     lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], Phi_low=Phi_low, b_low=b_low, omega_low=omega_low, f = f:
+            #         f(start, stop, t) *
+            #         (Phi_low @ (b_low * jnp.exp(omega_low * (t-start))))
+            # )
             time_funcs.append(
                 lambda t, start=ts[ts_idx[j]], stop = ts[min(ts_idx[j+1], len(ts)-1)], b_low=b_low, omega_low=omega_low, f = f:
                     f(start, stop, t) *
@@ -153,11 +185,24 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
 
             # Reconstruct X using only the high frequency modes for each time bin
           
-            X_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_segment))*b_low[:, None])
-            Y_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, (t_segment+dt)))*b_low[:, None])
+            X_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_local)) * b_low[:, None])
 
+            # GUARD: Check if this reconstruction is actually helpful
+            # If the residual is larger than the original bin, the DMD fit is bad.
+            # if l < 2:
+            #     slack_guard = 3
+            # else:
+            #     slack_guard = 3
+            # if jnp.linalg.norm(X_bin - X_low) > jnp.linalg.norm(X_bin) * slack_guard:
+            #     # Do NOT subtract; pass the original data forward
+            #     X_temp = X_bin
+            #     Y_temp = Y_bin
+            #     # Optionally: remove the last appended function so it doesn't appear in the plot
+            #     funcs.pop() 
+            # else:
+            print(f"saved {Phi_low.shape[1]} modes in l {l} j {j}")
             X_temp = X_bin - X_low
-            Y_temp = Y_bin - Y_low
+            Y_temp = Y_bin - (Phi_low @ (jnp.exp(jnp.outer(omega_low, (t_local + dt))) * b_low[:, None]))
 
             X_temps.append(X_temp)
             Y_temps.append(Y_temp)

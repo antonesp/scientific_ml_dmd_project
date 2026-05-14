@@ -122,6 +122,9 @@ X_dmd = Phis_DMD @ (b[:, None] * jnp.exp(omegas_DMD[:, None] * ts[None, :]))
 psi_truth = jnp.stack([psi1.flatten(), psi2.flatten(), psi3.flatten(), psi4.flatten()])
 g_dmd_reconstructed = psi_truth @ X_dmd 
 
+
+
+
 # 3. Plot them against the originals
 fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 for i in range(4):
