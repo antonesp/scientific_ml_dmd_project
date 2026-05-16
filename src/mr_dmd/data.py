@@ -25,21 +25,19 @@ class ncDataset(Dataset):
         np.save(output_folder, sst)
 
 
-
 def preprocess(data_path: str, output_folder: str) -> None:
     print("Preprocessing data...")
     dataset = ncDataset(data_path)
     dataset.preprocess(output_folder)
 
+
 def preprocess2(data_path: str, output_folder_data: str, output_folder_mask: str) -> None:
     nc = netCDF4.Dataset(data_path)
-    sst = nc["sst"][:,:,:]
+    sst = nc["sst"][:, :, :]
 
-    
     sst_flat = sst.reshape(sst.shape[0], -1).T
-    
-    mask = sst_flat.mask[:,0]
 
+    mask = sst_flat.mask[:, 0]
 
     sst_valid = sst_flat.compressed().reshape(-1, 2115)
     # print(sst_valid.shape)

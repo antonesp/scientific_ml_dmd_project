@@ -4,26 +4,27 @@ import matplotlib.animation as animation
 import numpy as np
 from mr_dmd.DMD_funcs import mrDMD
 
-def DMD(X,Xprime, r, energy_threshold=0.999):
-    U, Sigma, VT = jnp.linalg.svd(X,full_matrices=False) # Step 1
+
+def DMD(X, Xprime, r, energy_threshold=0.999):
+    U, Sigma, VT = jnp.linalg.svd(X, full_matrices=False)  # Step 1
     # Choose r adaptively based on singular value energy (prevents nans from forming)
     total_energy = jnp.sum(Sigma**2)
     cumulative_energy = jnp.cumsum(Sigma**2) / total_energy
     r_adaptive = int(jnp.searchsorted(cumulative_energy, energy_threshold)) + 1
     r_adaptive = min(r, r_adaptive, len(Sigma))  # never exceed requested r
 
-    Ur = U[:,:r_adaptive]
+    Ur = U[:, :r_adaptive]
     Sigmar = jnp.diag(Sigma[:r_adaptive])
 
-    Vr = VT[:r_adaptive,:].conj().T
+    Vr = VT[:r_adaptive, :].conj().T
 
-    Atilde = Ur.conj().T @ Xprime @ Vr @  jnp.linalg.inv(Sigmar)
-    
+    Atilde = Ur.conj().T @ Xprime @ Vr @ jnp.linalg.inv(Sigmar)
+
     Lambda, W = jnp.linalg.eig(Atilde)
-    
+
     # Use the standard DMD mode definition
     Phi = Xprime @ Vr @ jnp.linalg.inv(Sigmar) @ W
-    
+
     # SIMPLE AMPLITUDE CALCULATION
     # b represents the modal coordinates at t=0
     b = jnp.linalg.lstsq(Phi, X[:, 0], rcond=None)[0]
@@ -37,7 +38,7 @@ r = 30
 t_max = 128
 
 
-dt =  t_max / t_steps
+dt = t_max / t_steps
 
 
 def f(start, stop, t):
@@ -48,16 +49,16 @@ def f(start, stop, t):
 ts = jnp.linspace(0, t_max, t_steps)
 
 g_1 = lambda t: jnp.full_like(t, 0.2)
-g_2 = lambda t: 2*jnp.cos(1/(64)*2*jnp.pi*t)
+g_2 = lambda t: 2 * jnp.cos(1 / (64) * 2 * jnp.pi * t)
 
-g_3 = lambda t: 2*jnp.sin(1/32*jnp.pi*2*t) * f(0,64,t)
-g_4 = lambda t: 2*jnp.sin(1/8*t*jnp.pi*2) * f(64,96,t)
+g_3 = lambda t: 2 * jnp.sin(1 / 32 * jnp.pi * 2 * t) * f(0, 64, t)
+g_4 = lambda t: 2 * jnp.sin(1 / 8 * t * jnp.pi * 2) * f(64, 96, t)
 
 
 g_funcs = [g_1, g_2, g_3, g_4]
 
-xs = jnp.linspace(-20,20,200)
-ys = jnp.linspace(-20,20,200)
+xs = jnp.linspace(-20, 20, 200)
+ys = jnp.linspace(-20, 20, 200)
 
 X, Y = jnp.meshgrid(xs, ys)
 
@@ -67,60 +68,64 @@ k_mid = 0.8
 k_low = 0.3
 
 
-psi1 = np.abs(np.sin(k_high * X) * np.sin(k_high * Y) + 
-                np.sin(k_low * X) * np.sin(k_low * Y)
-                + np.sin(k_mid*X) + np.sin(k_mid*Y))
+psi1 = np.abs(
+    np.sin(k_high * X) * np.sin(k_high * Y)
+    + np.sin(k_low * X) * np.sin(k_low * Y)
+    + np.sin(k_mid * X)
+    + np.sin(k_mid * Y)
+)
 
 x0, y0 = -10, 10
 sigma = 4
-psi2 = np.exp(-((X - x0)**2 + (Y - y0)**2) / (2 * sigma**2))
+psi2 = np.exp(-((X - x0) ** 2 + (Y - y0) ** 2) / (2 * sigma**2))
 
 x0, y0 = 5, 5
 sigma_x, sigma_y = 12, 4
-psi3 = np.exp(-((X - x0)**2 / (2 * sigma_x**2) + (Y - y0)**2 / (2 * sigma_y**2)))
+psi3 = np.exp(-((X - x0) ** 2 / (2 * sigma_x**2) + (Y - y0) ** 2 / (2 * sigma_y**2)))
 
 
 x_offset = 8
 sigma_lobe = 5
-psi4 = (np.exp(-((X + x_offset)**2 + Y**2) / (2 * sigma_lobe**2)) + 
-        np.exp(-((X - x_offset)**2 + Y**2) / (2 * sigma_lobe**2)))
+psi4 = np.exp(-((X + x_offset) ** 2 + Y**2) / (2 * sigma_lobe**2)) + np.exp(
+    -((X - x_offset) ** 2 + Y**2) / (2 * sigma_lobe**2)
+)
 
 
 final_func = lambda t: (
-        g_1(t)[:, None, None] * psi1
-        + g_2(t)[:, None, None] * psi2
-        # + g_3(t)[:, None, None] * psi3
-        + g_4(t)[:, None, None] * psi4
+    g_1(t)[:, None, None] * psi1
+    + g_2(t)[:, None, None] * psi2
+    # + g_3(t)[:, None, None] * psi3
+    + g_4(t)[:, None, None] * psi4
 )
 
 raw = final_func(ts)
 
-data_flat = raw.T.reshape((raw.shape[1]*raw.shape[2], raw.shape[0]))
+data_flat = raw.T.reshape((raw.shape[1] * raw.shape[2], raw.shape[0]))
 data_flat = data_flat
 
 input = data_flat[:, :-1]
-output = data_flat[:,  1:]
+output = data_flat[:, 1:]
+
 
 def create_hankel_matrix(data, rows):
     # data: (Space, Time)
     # rows: number of delay taps (try 2 or 10)
-    return jnp.vstack([data[:, i:data.shape[1]-rows+i+1] for i in range(rows)])
+    return jnp.vstack([data[:, i : data.shape[1] - rows + i + 1] for i in range(rows)])
 
 
-
-H = create_hankel_matrix(data_flat, rows=10) # 2 is enough for a simple cosine
-print("Shape of Hankel matrix",H.shape)
-print("Shape of data flat",data_flat.shape)
+H = create_hankel_matrix(data_flat, rows=10)  # 2 is enough for a simple cosine
+print("Shape of Hankel matrix", H.shape)
+print("Shape of data flat", data_flat.shape)
 
 X_hankel = H[:, :-1]
 Xprime_hankel = H[:, 1:]
-spatial_size = len(xs)*len(ys)
+spatial_size = len(xs) * len(ys)
 
 M = 6
 L = 6
 r = 20
 
-Phis_DMD, Lambda, b = DMD(X_hankel, Xprime_hankel, r, energy_threshold= 2)
+Phis_DMD, Lambda, b = DMD(X_hankel, Xprime_hankel, r, energy_threshold=2)
 Phis, func, time_funcs = mrDMD(X_hankel, Xprime_hankel, M, L, f, dt, ts)
 
 mrDMD_reconstruct = jnp.zeros_like(data_flat)
@@ -133,7 +138,7 @@ print(func(118))
 print(func(119))
 print(func(127))
 # print(mrDMD_reconstruct[0,0:17])
-k = jnp.arange(t_steps) 
+k = jnp.arange(t_steps)
 v_lambda = Lambda[:, None] ** k
 dynamics = b[:, None] * v_lambda
 
@@ -145,13 +150,12 @@ print(X_rec_real.shape)
 
 # print("Normal DMD square error ",jnp.mean((X_rec_real[:spatial_size]-data_flat)**2, axis=0))
 # print("mrDMD square errpor ", jnp.mean((mrDMD_reconstruct - data_flat)**2, axis= 0))
-error_DMD = jnp.mean((X_rec_real[:spatial_size]-data_flat)**2, axis=0)
-error_mrDMD = jnp.mean((mrDMD_reconstruct - data_flat)**2, axis= 0)
+error_DMD = jnp.mean((X_rec_real[:spatial_size] - data_flat) ** 2, axis=0)
+error_mrDMD = jnp.mean((mrDMD_reconstruct - data_flat) ** 2, axis=0)
 
 
-
-plt.plot(ts, error_DMD, label = "Normal DMD")
-plt.plot(ts, jnp.mean((mrDMD_reconstruct - data_flat)**2, axis= 0), label = "mrDMD")
+plt.plot(ts, error_DMD, label="Normal DMD")
+plt.plot(ts, jnp.mean((mrDMD_reconstruct - data_flat) ** 2, axis=0), label="mrDMD")
 plt.legend()
 plt.show()
 
@@ -159,20 +163,25 @@ plt.show()
 # Animation of mrDMD_reconstruct frames
 fig2, ax2 = plt.subplots()
 frame0 = jnp.real(mrDMD_reconstruct[:, 0]).reshape(len(ys), len(xs))
-im = ax2.imshow(np.asarray(frame0).T, cmap='viridis', origin='lower', vmin=jnp.min(mrDMD_reconstruct), vmax=jnp.max(mrDMD_reconstruct))
-ax2.set_title('mrDMD reconstruction')
+im = ax2.imshow(
+    np.asarray(frame0).T,
+    cmap="viridis",
+    origin="lower",
+    vmin=jnp.min(mrDMD_reconstruct),
+    vmax=jnp.max(mrDMD_reconstruct),
+)
+ax2.set_title("mrDMD reconstruction")
+
 
 def update(frame):
     data = jnp.real(mrDMD_reconstruct[:, frame]).reshape(len(ys), len(xs))
     im.set_data(np.asarray(data).T)
-    ax2.set_xlabel(f'Time step: {frame}')
+    ax2.set_xlabel(f"Time step: {frame}")
     return (im,)
+
 
 ani = animation.FuncAnimation(fig2, update, frames=t_steps, interval=100, blit=True)
 plt.show()
-
-
-
 
 
 # all_trajectories = []
@@ -196,7 +205,6 @@ plt.show()
 #     ax.set_ylabel("Amplitude")
 
 
-
 # axes[-1].set_xlabel("Time")
 # plt.tight_layout()
 # # plt.show()
@@ -207,7 +215,6 @@ plt.show()
 
 
 # reconstructed_g_all = jnp.real(all_time_functions)
-
 
 
 # fig, axes = plt.subplots(reconstructed_g_all.shape[0], 1, figsize=(10, 2.5 * reconstructed_g_all.shape[0]), sharex=True)
@@ -222,7 +229,6 @@ plt.show()
 # axes[-1].set_xlabel("Time index")
 # plt.tight_layout()
 # # plt.show()
-
 
 
 # num_phis = len(Phis)

@@ -4,7 +4,7 @@ import numpy as np
 
 fb = "data/sst.mon.mean.nc"
 nc = netCDF4.Dataset(fb)
-sst = nc["sst"][:,:,:]
+sst = nc["sst"][:, :, :]
 
 # test = np.load("data/sst.npy")
 
@@ -18,9 +18,7 @@ print(type(sst_flat))
 print(sst_flat.shape)
 
 print("mean at start")
-print(np.mean(sst[0,:,:]))
+print(np.mean(sst[0, :, :]))
 
 print("mean at end")
 print(np.mean(sst[-1, :, :]))
-
-
