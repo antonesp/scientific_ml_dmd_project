@@ -1,6 +1,4 @@
-from pathlib import Path
 
-import typer
 import netCDF4
 import numpy as np
 from torch.utils.data import Dataset

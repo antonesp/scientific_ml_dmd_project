@@ -225,7 +225,7 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
 
 
 if __name__ == "__main__":
-    from mr_dmd.helper_functions import sum_of_sines, make_wavelet_window, indicator
+    from mr_dmd.helper_functions import sum_of_sines, make_wavelet_window
 
     t_steps = 65 * 4
     n_steps = 20

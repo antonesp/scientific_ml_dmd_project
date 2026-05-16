@@ -1,5 +1,4 @@
 import netCDF4
-import matplotlib.pyplot as plt
 import numpy as np
 
 fb = "data/sst.mon.mean.nc"
