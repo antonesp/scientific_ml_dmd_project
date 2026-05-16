@@ -2,7 +2,7 @@ from scipy.stats import norm
 import numpy as np
 import jax.random as random
 import jax.numpy as jnp
-import pywt
+
 
 
 def Schroeder_sines(n, x, t, seed=1, amplitude=0.1, max_power=100):
@@ -45,9 +45,8 @@ def sum_of_sines(seed, n):
 def indicator(start, stop, t):
     return 1.0 if start <= t <= stop else 0.0
 
-def hann_window(start, stop):
-    return lambda t, s=start, e=stop: jnp.where(
-        (t >= s) & (t < e),
-        0.5 * (1 - jnp.cos(2 * jnp.pi * (t - s) / (e - s))),
-        0.0
-    )
+def hann_window(start, stop, t):
+    if start == stop:
+        return 1
+    
+    return 0.5 * (1 - jnp.cos(2 * jnp.pi * (t - start) / (stop - start)))
