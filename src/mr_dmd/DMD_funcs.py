@@ -2,6 +2,7 @@ from matplotlib import pyplot as plt
 import jax.numpy as jnp
 
 
+
 def DMD(X, Xprime, r, energy_threshold=0.999):
     if jnp.linalg.norm(X) < 1e-9:
         return None, None, None
@@ -47,10 +48,10 @@ def DMD_safe(X, Y, r, dt, energy_threshold):
         omega
     )  # Force Re(omega) <= 0 to prevent the explosion at t=64
 
-    return Phi, Lambda, b, omega
+    return Phi, b, omega
 
 
-def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
+def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
     """
     Multi resolution DMD function:
     - X:  Datapoints at t_n (n_spacial, T)
@@ -95,7 +96,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
                 continue
 
             # Compute DMD for each time bin
-            Phi, Lambda, b, omega = DMD_safe(X_bin, Y_bin, r, dt, energy_threshold)
+            Phi, b, omega = DMD_safe(X_bin, Y_bin, r, dt, energy_threshold)
 
             if Phi is None or jnp.any(jnp.isnan(b)) or jnp.any(jnp.isnan(omega)):
                 print(f"Numerical instability detected in Layer {l+1}, Bin {j+1}. Skipping.")
@@ -138,7 +139,14 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
                 t, start=ts[ts_idx[j]], stop=ts[ts_idx[j + 1] - 1], P=Phi_low, b=b_low, o=omega_low
             ):
                 # This prevents any NaN in P, b, or o from leaking into t < start or t > stop
-                return jnp.where((t >= start) & (t <= stop), jnp.real(P @ (b * jnp.exp(o * (t - start)))), 0.0)
+                dynamics = jnp.real(P @ (b[:, None] * jnp.exp(o[:, None] * (t - start))))              
+
+                # 2. Make mask to fit on time bin
+                mask = (t >= start) & (t <= stop)
+
+                # 3. Apply the mask
+                return jnp.where(mask, dynamics, 0.0)
+                
 
             funcs.append(robust_reconstruction)
             time_funcs.append(
