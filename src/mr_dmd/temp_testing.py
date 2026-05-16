@@ -1,8 +1,6 @@
 from matplotlib import pyplot as plt
-from matplotlib.animation import FuncAnimation
-from matplotlib.widgets import Slider
 import jax.numpy as jnp
-from mr_dmd.DMD_funcs import mrDMD, DMD
+from mr_dmd.DMD_funcs import DMD
 import numpy as np
 
 t_steps = 500
