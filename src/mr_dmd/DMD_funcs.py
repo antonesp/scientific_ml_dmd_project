@@ -68,6 +68,10 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
     Phis = []
     for l in range(L):
         print(f"Layer: {l+1} of {L}")
+
+        X_residual = jnp.copy(X)
+        Y_residual = jnp.copy(Y)
+
         J = 2**l
         r = M  # Ensure that r > 0                                      # Size of each time bin
         ts_idx = jnp.linspace(0, X.shape[1], J + 1, dtype=int)  # Splitting indecies
@@ -76,8 +80,6 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
             print("Not enough timesteps for desired resolution")
             break
 
-        X_temps = []
-        Y_temps = []
         for j in range(J):
             # Compute time segments
             t_segment = ts[ts_idx[j] : ts_idx[j + 1]]
@@ -90,8 +92,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
             print("realtive energy", bin_relative_nergy)
             if bin_relative_nergy <= 1e-2:
                 print(f"To low energy in Layer {l+1}, Bin {j+1}. Skipping.")
-                X_temps.append(jnp.zeros_like(X_bin))
-                Y_temps.append(jnp.zeros_like(Y_bin))
+
                 continue
 
             # Compute DMD for each time bin
@@ -99,19 +100,16 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
 
             if Phi is None or jnp.any(jnp.isnan(b)) or jnp.any(jnp.isnan(omega)):
                 print(f"Numerical instability detected in Layer {l+1}, Bin {j+1}. Skipping.")
-                X_temps.append(X_bin)  # Pass the data forward as residual instead
-                Y_temps.append(Y_bin)
+
                 continue
 
             if Phi is None:
                 print("Phi was nan")
-                X_temps.append(X_bin)
-                Y_temps.append(Y_bin)
+
                 continue
 
             if X_bin.shape[0] < 2:
-                X_temps.append(X_bin)  # passthrough, shape (n_spatial, n_time)
-                Y_temps.append(Y_bin)
+
                 continue
 
             # Convert the eigenvalues and find the low frequency modes
@@ -120,8 +118,6 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
             mask = freq <= 1 / (window_duration)
 
             if mask.sum() == 0:
-                X_temps.append(X_bin)  # Continue if nothing is removed
-                Y_temps.append(Y_bin)
                 continue
 
             # Extract low frequency modes to the mrDMD function
@@ -151,25 +147,25 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
             )
 
             # Reconstruct X using only the low frequency modes for each time bin
+ 
             X_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_local)) * b_low[:, None])
 
-            X_temp = X_bin - X_low
-            Y_temp = Y_bin - (Phi_low @ (jnp.exp(jnp.outer(omega_low, (t_local + dt))) * b_low[:, None]))
+            Y_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_local + dt)) * b_low[:, None])
 
-            X_temps.append(X_temp)
-            Y_temps.append(Y_temp)
+            X_residual = X_residual.at[:, ts_idx[j] : ts_idx[j + 1]].add(-X_low)
 
-        # Combine X_temp to make new X and Y
-        X = jnp.concatenate(X_temps, axis=1)
-        Y = jnp.concatenate(Y_temps, axis=1)
-        ts = ts[: X.shape[1]]
+            Y_residual = Y_residual.at[:, ts_idx[j] : ts_idx[j + 1]].add(-Y_low)
+
+        X = X_residual
+
+        Y = Y_residual
 
     # Sum all the functions together
     return Phis, lambda t: sum(g(t) for g in funcs), time_funcs
 
 
 if __name__ == "__main__":
-    from mr_dmd.helper_functions import sum_of_sines, make_wavelet_window, indicator
+    from mr_dmd.helper_functions import sum_of_sines, indicator
 
     t_steps = 200
     n_steps = 20

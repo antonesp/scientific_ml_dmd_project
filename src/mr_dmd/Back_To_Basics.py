@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import numpy as np
 from mr_dmd.DMD_funcs import mrDMD
-
+from mr_dmd.overlapping_window_mrDMD import OmrDMD
 
 def DMD(X, Xprime, r, energy_threshold=0.999):
     U, Sigma, VT = jnp.linalg.svd(X, full_matrices=False)  # Step 1
@@ -132,7 +132,7 @@ mrDMD_reconstruct = jnp.zeros_like(data_flat)
 
 for i in range(t_steps):
     X_at_step = func(ts[i])[:spatial_size]
-    mrDMD_reconstruct = mrDMD_reconstruct.at[:, i].set(X_at_step)
+    mrDMD_reconstruct = mrDMD_reconstruct.at[:, i].set(X_at_step.ravel())
 
 print(func(118))
 print(func(119))

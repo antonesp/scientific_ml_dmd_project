@@ -3,7 +3,7 @@ from mr_dmd.DMD_funcs import mrDMD
 import jax.numpy as jnp
 import jax
 import numpy as np
-from mr_dmd.helper_functions import indicator, make_wavelet_window
+from mr_dmd.helper_functions import indicator
 
 jax.config.update("jax_enable_x64", True)
 
@@ -28,7 +28,7 @@ if __name__ == "__main__":
     dt = 1
 
     # Mexican hat
-    f = make_wavelet_window("cmor1.5-1.0")
+    # f = make_wavelet_window("cmor1.5-1.0")
     f = indicator
     Phis, fun, time_func = mrDMD(X, Y, M, L, f, dt, ts)
 
