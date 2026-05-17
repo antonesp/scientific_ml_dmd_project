@@ -46,7 +46,7 @@ def DMD_safe(X, Y, r, dt, energy_threshold, window_duration):
     omega = jnp.log(Lambda_clipped) / dt
 
     # Clamp Re(omega) in [-1/window_duration, 0] to prevent modes that stabilize too quickly or are unstable (prevents the explosion at t=64)
-    omega = jnp.maximum(jnp.minimum(jnp.real(omega), 1000), -1/window_duration) + 1j * jnp.imag(
+    omega = jnp.maximum(jnp.minimum(jnp.real(omega), 0), -1/window_duration) + 1j * jnp.imag(
             omega
         )  
 
@@ -71,6 +71,10 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
     Phis = []
     for l in range(L):
         print(f"Layer: {l+1} of {L}")
+
+        X_residual = jnp.copy(X)
+        Y_residual = jnp.copy(Y)
+
         J = 2**l
         r = M  # Ensure that r > 0                                      # Size of each time bin
         ts_idx = jnp.linspace(0, X.shape[1], J + 1, dtype=int)  # Splitting indecies
@@ -98,8 +102,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
             #print("realtive energy", bin_relative_nergy)
             if bin_relative_nergy <= 1e-2:
                 print(f"To low energy in Layer {l+1}, Bin {j+1}. Skipping.")
-                X_temps.append(jnp.zeros_like(X_bin))
-                Y_temps.append(jnp.zeros_like(Y_bin))
+
                 continue
 
             # Compute DMD for each time bin
@@ -107,19 +110,16 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
 
             if Phi is None or jnp.any(jnp.isnan(b)) or jnp.any(jnp.isnan(omega)):
                 print(f"Numerical instability detected in Layer {l+1}, Bin {j+1}. Skipping.")
-                X_temps.append(X_bin)  # Pass the data forward as residual instead
-                Y_temps.append(Y_bin)
+
                 continue
 
             if Phi is None:
                 print("Phi was nan")
-                X_temps.append(X_bin)
-                Y_temps.append(Y_bin)
+
                 continue
 
             if X_bin.shape[0] < 2:
-                X_temps.append(X_bin)  # passthrough, shape (n_spatial, n_time)
-                Y_temps.append(Y_bin)
+
                 continue
 
             # Convert the eigenvalues and find the low frequency modes
@@ -131,8 +131,6 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
             mask = (freq <= 1 / window_duration) #& (jnp.real(omega) >= min_decay)
 
             if mask.sum() == 0:
-                X_temps.append(X_bin)  # Continue if nothing is removed
-                Y_temps.append(Y_bin)
                 continue
 
             # Extract low frequency modes to the mrDMD function
@@ -151,6 +149,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
                 t, start=ts[ts_idx[j]], stop=ts[ts_idx[j + 1]], P=Phi_low, b=b_low, o=omega_low
             ):
                 # This prevents any NaN in P, b, or o from leaking into t < start or t > stop
+                
                 dynamics = jnp.real(P @ (b[:, None] * jnp.exp(o[:, None] * (t - start))))              
 
                 # 2. Make mask to fit on time bin
@@ -158,6 +157,8 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
 
                 # 3. Apply the mask
                 return jnp.where(mask, dynamics, 0.0)
+
+
                 
 
             funcs.append(robust_reconstruction)
@@ -171,6 +172,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
             )
 
             # Reconstruct X using only the low frequency modes for each time bin
+ 
             X_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_local)) * b_low[:, None])
 
             X_temp = X_bin - X_low
@@ -191,7 +193,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
         # Combine X_temp to make new X and Y
         X = jnp.concatenate(X_temps, axis=1)
         Y = jnp.concatenate(Y_temps, axis=1)
-        ts = ts[: X.shape[1]]
+        # ts = ts[: X.shape[1]]
         
         Phis.append(Phi_l)
 
@@ -200,7 +202,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
 
 
 if __name__ == "__main__":
-    from mr_dmd.helper_functions import sum_of_sines, make_wavelet_window, indicator
+    from mr_dmd.helper_functions import sum_of_sines, indicator
 
     t_steps = 200
     n_steps = 20
@@ -212,7 +214,7 @@ if __name__ == "__main__":
     g = sum_of_sines(seed, 10)
 
     # Mexican hat
-    f = make_wavelet_window("gaus2")
+    # f = make_wavelet_window("gaus2")
     f = indicator
 
     x = jnp.linspace(0, 2 * jnp.pi, n_steps)

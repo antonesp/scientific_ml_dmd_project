@@ -96,20 +96,15 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
 
         stride = window_width // 2
 
-        # Ensure that r > 0                                      # Size of each time bin
-
-        ts_idx = jnp.linspace(0, X.shape[1], J + 1, dtype=int)  # Splitting indecies
 
         if X.shape[1] < r:
             print("Not enough timesteps for desired resolution")
 
             break
 
-        num_windows = 2 * J + 1
-        print(f"{window_width=}")
-        X_layer_low = jnp.zeros_like(X)
-        Y_layer_low = jnp.zeros_like(Y)
-        coverage_map = jnp.zeros(X.shape[1])
+        # num_windows = 2 * J + 1
+        num_windows = (X_original.shape[1] - window_width) // stride + 1
+
 
         for j in range(-1, num_windows - 1):
             print(j)
@@ -153,13 +148,13 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
             # Convert the eigenvalues and find the low frequency modes
 
             window_duration = jnp.abs((ts[idx_u] - ts[idx_l]))  # Watning the minus 1, may not be correct
-
+            # print("required frequency",1 / window_duration)
             freq = jnp.abs(jnp.imag(omega)) / (2 * jnp.pi)
 
             if j == -1 or j == window_duration - 2:
-                mask = freq <= 1 / (2 * window_duration)
+                mask = freq <= 4 / (2 * window_duration)
             else:
-                mask = freq <= 1 / (window_duration)
+                mask = freq <= 4 / (window_duration)
 
             # Extract low frequency modes to the mrDMD function
 
@@ -211,9 +206,9 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
 
             Y_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_local + dt)) * b_low[:, None])
 
-            X_residual = X_residual.at[:, idx_l:idx_u].add(-X_low * 0.5)
+            X_residual = X_residual.at[:, idx_l:idx_u].add(-X_low)
 
-            Y_residual = Y_residual.at[:, idx_l:idx_u].add(-Y_low * 0.5)
+            Y_residual = Y_residual.at[:, idx_l:idx_u].add(-Y_low)
 
         X = X_residual
 
@@ -225,11 +220,10 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999):
 
 
 if __name__ == "__main__":
-    from mr_dmd.helper_functions import sum_of_sines, make_wavelet_window
-
-    t_steps = 65 * 4
+    from mr_dmd.helper_functions import sum_of_sines, indicator
+    t_steps = 64 * 6
     n_steps = 20
-    r = 8
+
     t_max = 64
 
     # g = lambda x,t : 1*jnp.cos(x + t)
@@ -237,8 +231,8 @@ if __name__ == "__main__":
     g = sum_of_sines(seed, 10)
 
     # Mexican hat
-    f = make_wavelet_window("gaus2")
-    # f = indicator
+    # f = make_wavelet_window("gaus2")
+    f = indicator
 
     x = jnp.linspace(0, 2 * jnp.pi, n_steps)
     x_precise = jnp.linspace(0, 2 * jnp.pi, 500)
@@ -249,15 +243,16 @@ if __name__ == "__main__":
     X_prime = raw[:, 1:]
 
     # Run the DMD
-    L = 5
+    r = 6
+    L = 4
     M = r
     dt = t[1] - t[0]
 
     Phis, fun, _ = OmrDMD(X, X_prime, M, L, f, dt, t, energy_threshold=0.999)
     # Phi_DMD = DMD(X, X_prime, r)
 
-    t1 = 5
-    t2 = 50
+    t1 = 1
+    t2 = 49
 
     f_1 = fun(t1)
     f_10 = fun(t2)
