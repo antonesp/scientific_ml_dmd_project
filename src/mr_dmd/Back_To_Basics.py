@@ -20,11 +20,11 @@ def f(start, stop, t):
 
 ts = jnp.linspace(0, t_max, t_steps)
 
-g_1 = lambda t: 4*jnp.full_like(t, 0.2)
-g_2 = lambda t: 2 * jnp.cos(1 / (64) * 2 * jnp.pi * t)
+g_1 = lambda t: jnp.full_like(t, 0.2)
+g_2 = lambda t: 2 * jnp.cos(1 / 64 * 2 * jnp.pi * t)
 
-g_3 = lambda t: 2 * jnp.sin(1 / 32 * jnp.pi * 2 * t) # * f(64, 128, t)
-g_4 = lambda t: 2 * jnp.sin(1 / 40 * jnp.pi * 2 * t) #* f(0, 64, t)
+g_3 = lambda t: 2 * jnp.sin(1 / 32 * jnp.pi * 2 * t) * f(0, 64, t)
+g_4 = lambda t: 2 * jnp.sin(1 / 16 * jnp.pi * 2 * t) * f(64, 96, t)
 
 
 g_funcs = [g_1, g_2, g_3, g_4]
@@ -79,28 +79,29 @@ input = data_flat[:, :-1]
 output = data_flat[:, 1:]
 
 
-# def create_hankel_matrix(data, rows):
-#     # data: (Space, Time)
-#     # rows: number of delay taps (try 2 or 10)
-#     return jnp.vstack([data[:, i : data.shape[1] - rows + i + 1] for i in range(rows)])
+def create_hankel_matrix(data, rows):
+    # data: (Space, Time)
+    # rows: number of delay taps (try 2 or 10)
+    return jnp.vstack([data[:, i : data.shape[1] - rows + i + 1] for i in range(rows)])
 
 
-# H = create_hankel_matrix(data_flat, rows=10)  # 2 is enough for a simple cosine
-# print("Shape of Hankel matrix", H.shape)
-# print("Shape of data flat", data_flat.shape)
+H = create_hankel_matrix(data_flat, rows=10)  # 2 is enough for a simple cosine
+print("Shape of Hankel matrix", H.shape)
+print("Shape of data flat", data_flat.shape)
 
-# X_hankel = H[:, :-1]
-# Xprime_hankel = H[:, 1:]
+X_hankel = H[:, :-1]
+Xprime_hankel = H[:, 1:]
 
 spatial_size = len(xs) * len(ys)
 
 M = 6
-L = 6
-# r = 50
+L = 7
+r = 30
 
 
 Phis, func, time_funcs = mrDMD(input, output, M, L, f, dt, ts)
-r = len(Phis)
+# r = len(Phis)*4
+
 Phis_DMD, Lambda, b = DMD(input, output, r, energy_threshold=2)
 
 mrDMD_reconstruct = jnp.zeros_like(data_flat)
@@ -125,8 +126,8 @@ error_DMD = jnp.mean((X_rec_real[:spatial_size] - data_flat) ** 2, axis=0)
 error_mrDMD = jnp.mean((mrDMD_reconstruct - data_flat) ** 2, axis=0)
 
 
-plt.plot(ts[:-1], error_DMD[:-1], label="Normal DMD")
-plt.plot(ts[:-1], jnp.mean((mrDMD_reconstruct - data_flat) ** 2, axis=0)[:-1], label="mrDMD")
+plt.plot(ts[:-12], error_DMD[:-12], label="Normal DMD")
+plt.plot(ts[:-12], jnp.mean((mrDMD_reconstruct - data_flat) ** 2, axis=0)[:-12], label="mrDMD")
 plt.legend()
 plt.show()
 
@@ -177,8 +178,9 @@ def update(frame):
     return (im_mr, im_dmd, im_true)
 
 
-ani = animation.FuncAnimation(fig2, update, frames=t_steps-1, interval=100, blit=True)
+ani = animation.FuncAnimation(fig2, update, frames=t_steps-12, interval=100, blit=True)
 
+ani.save("images/mr_dmd_comparison.gif", writer="pillow", fps=10)
 plt.show()
 
 

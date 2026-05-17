@@ -30,7 +30,7 @@ def DMD(X, Xprime, r, energy_threshold=0.999):
     return Phi, Lambda, b
 
 
-def DMD_safe(X, Y, r, dt, energy_threshold):
+def DMD_safe(X, Y, r, dt, energy_threshold, window_duration):
     # 1. Energy check: if the bin is already empty, return None
     if jnp.linalg.norm(X) < 1e-5:
         return None, None, None, None
@@ -44,9 +44,11 @@ def DMD_safe(X, Y, r, dt, energy_threshold):
 
     # 4. Convert to Omega and CLAMP
     omega = jnp.log(Lambda_clipped) / dt
-    # omega = jnp.minimum(jnp.real(omega), 0.0) + 1j * jnp.imag(
-    #     omega
-    # )  # Force Re(omega) <= 0 to prevent the explosion at t=64
+
+    # Clamp Re(omega) in [-1/window_duration, 0] to prevent modes that stabilize too quickly or are unstable (prevents the explosion at t=64)
+    omega = jnp.maximum(jnp.minimum(jnp.real(omega), 0), -1/window_duration) + 1j * jnp.imag(
+            omega
+        )  
 
     return Phi, b, omega
 
@@ -81,23 +83,30 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
             print("Not enough timesteps for desired resolution")
             break
 
+        X_temps = []
+        Y_temps = []
+        Phi_l = []
         for j in range(J):
             # Compute time segments
             t_segment = ts[ts_idx[j] : ts_idx[j + 1]]
             t_local = t_segment - t_segment[0]
+            window_duration = jnp.abs((ts[ts_idx[j + 1]] - ts[ts_idx[j]])) 
 
             X_bin = X[:, ts_idx[j] : ts_idx[j + 1]]
             Y_bin = Y[:, ts_idx[j] : ts_idx[j + 1]]
+            Phi_j= []
+            
+
 
             bin_relative_nergy = jnp.linalg.norm(X_bin) / jnp.linalg.norm(X_original[:, ts_idx[j] : ts_idx[j + 1]])
-            print("realtive energy", bin_relative_nergy)
-            if bin_relative_nergy <= 5e-3:
+            #print("realtive energy", bin_relative_nergy)
+            if bin_relative_nergy <= 1e-2:
                 print(f"To low energy in Layer {l+1}, Bin {j+1}. Skipping.")
 
                 continue
 
             # Compute DMD for each time bin
-            Phi, b, omega = DMD_safe(X_bin, Y_bin, r, dt, energy_threshold)
+            Phi, b, omega = DMD_safe(X_bin, Y_bin, r, dt, energy_threshold, window_duration)
 
             if Phi is None or jnp.any(jnp.isnan(b)) or jnp.any(jnp.isnan(omega)):
                 print(f"Numerical instability detected in Layer {l+1}, Bin {j+1}. Skipping.")
@@ -114,10 +123,12 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
                 continue
 
             # Convert the eigenvalues and find the low frequency modes
-            # window_duration = jnp.abs((ts[ts_idx[j + 1]-1] - ts[ts_idx[j]]))  # Watning the minus 1, may not be correct
-            window_duration = jnp.abs(ts[ts_idx[j + 1] - 1] - ts[ts_idx[j]]) + dt
+
             freq = jnp.abs(jnp.imag(omega)) / (2 * jnp.pi)
-            mask = freq <= 1 / (window_duration)
+            
+            # Filter: low frequency AND not too fast decaying
+            min_decay = -1.0 / window_duration  # mode must survive at least one window
+            mask = (freq <= 1 / window_duration) #& (jnp.real(omega) >= min_decay)
 
             if mask.sum() == 0:
                 continue
@@ -126,23 +137,23 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
             Phi_low = Phi[:, mask]
             b_low = b[mask]
             omega_low = omega[mask]
-            omega_low = jnp.minimum(jnp.real(omega_low), 0.0) + 1j * jnp.imag(omega_low)
+            #omega_low = jnp.minimum(jnp.real(omega_low), 0.0) + 1j * jnp.imag(omega_low)
 
             print(f"Saving {Phi_low.shape[1]} mode(s) in (j={j+1}, l={l+1})")
             for i in range(0, Phi_low.shape[1]):
-                Phis.append(Phi_low[:, i][:, None])
+                Phi_j.append(Phi_low[:, i][:, None])
 
 
- 
+
             def robust_reconstruction(
-                t, start=ts[ts_idx[j]], stop=ts[ts_idx[j + 1]-1], P=Phi_low, b=b_low, o=omega_low
+                t, start=ts[ts_idx[j]], stop=ts[ts_idx[j + 1]], P=Phi_low, b=b_low, o=omega_low
             ):
                 # This prevents any NaN in P, b, or o from leaking into t < start or t > stop
                 
                 dynamics = jnp.real(P @ (b[:, None] * jnp.exp(o[:, None] * (t - start))))              
 
                 # 2. Make mask to fit on time bin
-                mask = (t >= start) & (t <= stop)
+                mask = (t >= start) & (t < stop)
 
                 # 3. Apply the mask
                 return jnp.where(mask, dynamics, 0.0)
@@ -164,19 +175,27 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
  
             X_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_local)) * b_low[:, None])
 
-            Y_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_local + dt)) * b_low[:, None])
+            X_temp = X_bin - X_low
+            Y_temp = Y_bin - (Phi_low @ (jnp.exp(jnp.outer(omega_low, (t_local + dt))) * b_low[:, None]))
 
-            # X_residual = X_residual.at[:, ts_idx[j] : ts_idx[j + 1]].add(-X_low)
+            X_temps.append(X_temp)
+            Y_temps.append(Y_temp)
+            if l<=1:
+                print(f"X_bin[:,0] norm at j={j}, l={l}: {jnp.linalg.norm(X_bin[:,0]):.4f}")
+                print(f"X_low[:,0] norm at j={j}, l={l}: {jnp.linalg.norm(X_low[:,0]):.4f}")
+                print(f"X_temp[:,0] norm at j={j}, l={l}: {jnp.linalg.norm(X_temp[:,0]):.4f}")
+                print(f"Re(omega_low) at l=1, j=0: {jnp.real(omega_low)}")
+                print(f"X_low norm at t=0:  {jnp.linalg.norm(X_low[:,0]):.4f}")
+                print(f"X_low norm at t=-1: {jnp.linalg.norm(X_low[:,-1]):.4f}")
+        
+            Phi_l.append(Phi_j)
 
-            # Y_residual = Y_residual.at[:, ts_idx[j] : ts_idx[j + 1]].add(-Y_low)
-
-            X = X.at[:, ts_idx[j] : ts_idx[j + 1]].add(-X_low)
-
-            Y = Y.at[:, ts_idx[j] : ts_idx[j + 1]].add(-Y_low)
-
-        # X = X_residual
-
-        # Y = Y_residual
+        # Combine X_temp to make new X and Y
+        X = jnp.concatenate(X_temps, axis=1)
+        Y = jnp.concatenate(Y_temps, axis=1)
+        # ts = ts[: X.shape[1]]
+        
+        Phis.append(Phi_l)
 
     # Sum all the functions together
     return Phis, lambda t: sum(g(t) for g in funcs), time_funcs
