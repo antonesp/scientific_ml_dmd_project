@@ -5,32 +5,6 @@ import numpy as np
 from mr_dmd.DMD_funcs import mrDMD, DMD
 from mr_dmd.overlapping_window_mrDMD import OmrDMD
 
-# def DMD(X, Xprime, r, energy_threshold=0.999):
-#     U, Sigma, VT = jnp.linalg.svd(X, full_matrices=False)  # Step 1
-#     # Choose r adaptively based on singular value energy (prevents nans from forming)
-#     total_energy = jnp.sum(Sigma**2)
-#     cumulative_energy = jnp.cumsum(Sigma**2) / total_energy
-#     r_adaptive = int(jnp.searchsorted(cumulative_energy, energy_threshold)) + 1
-#     r_adaptive = min(r, r_adaptive, len(Sigma))  # never exceed requested r
-
-#     Ur = U[:, :r_adaptive]
-#     Sigmar = jnp.diag(Sigma[:r_adaptive])
-
-#     Vr = VT[:r_adaptive, :].conj().T
-
-#     Atilde = Ur.conj().T @ Xprime @ Vr @ jnp.linalg.inv(Sigmar)
-
-#     Lambda, W = jnp.linalg.eig(Atilde)
-
-#     # Use the standard DMD mode definition
-#     Phi = Xprime @ Vr @ jnp.linalg.inv(Sigmar) @ W
-
-#     # SIMPLE AMPLITUDE CALCULATION
-#     # b represents the modal coordinates at t=0
-#     b = jnp.linalg.lstsq(Phi, X[:, 0], rcond=None)[0]
-
-#     return Phi, Lambda, b
-
 
 t_steps = 128
 n_steps = 20
@@ -38,7 +12,6 @@ t_max = 128
 
 
 dt = t_max / t_steps
-
 
 def f(start, stop, t):
     # This uses JAX logic to return 0 or 1 without Python if/else
@@ -106,18 +79,19 @@ input = data_flat[:, :-1]
 output = data_flat[:, 1:]
 
 
-def create_hankel_matrix(data, rows):
-    # data: (Space, Time)
-    # rows: number of delay taps (try 2 or 10)
-    return jnp.vstack([data[:, i : data.shape[1] - rows + i + 1] for i in range(rows)])
+# def create_hankel_matrix(data, rows):
+#     # data: (Space, Time)
+#     # rows: number of delay taps (try 2 or 10)
+#     return jnp.vstack([data[:, i : data.shape[1] - rows + i + 1] for i in range(rows)])
 
 
-H = create_hankel_matrix(data_flat, rows=10)  # 2 is enough for a simple cosine
-print("Shape of Hankel matrix", H.shape)
-print("Shape of data flat", data_flat.shape)
+# H = create_hankel_matrix(data_flat, rows=10)  # 2 is enough for a simple cosine
+# print("Shape of Hankel matrix", H.shape)
+# print("Shape of data flat", data_flat.shape)
 
-X_hankel = H[:, :-1]
-Xprime_hankel = H[:, 1:]
+# X_hankel = H[:, :-1]
+# Xprime_hankel = H[:, 1:]
+
 spatial_size = len(xs) * len(ys)
 
 M = 6
@@ -147,10 +121,6 @@ X_rec = jnp.dot(Phis_DMD, dynamics)
 X_rec_real = jnp.real(X_rec)
 
 
-print(X_rec_real.shape)
-
-# print("Normal DMD square error ",jnp.mean((X_rec_real[:spatial_size]-data_flat)**2, axis=0))
-# print("mrDMD square errpor ", jnp.mean((mrDMD_reconstruct - data_flat)**2, axis= 0))
 error_DMD = jnp.mean((X_rec_real[:spatial_size] - data_flat) ** 2, axis=0)
 error_mrDMD = jnp.mean((mrDMD_reconstruct - data_flat) ** 2, axis=0)
 
