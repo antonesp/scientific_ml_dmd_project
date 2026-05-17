@@ -66,11 +66,13 @@ if __name__ == "__main__":
     ## Load the data
     data_path = "data/sst.npy"
     mask_path = "data/sst_mask.npy"
-    time_path = "data/time.npy"
+    # time_path = "data/time.npy"
 
     sst_flat = jnp.load(data_path)
     mask = jnp.load(mask_path)
-    time = jnp.load(time_path)
+    print("mask shape", mask.shape)
+
+    # time = jnp.load(time_path)
     sst_flat = sst_flat[:, 1188:1428]
     time = time[1188:1428]
     t_steps = sst_flat.shape[1]
@@ -86,7 +88,6 @@ if __name__ == "__main__":
     dt = 1
 
     # Mexican hat
-
     f = indicator
     Phis, fun, time_func = mrDMD(X.copy(), Y.copy(), M, L, f, dt, ts)
     r = 0
@@ -111,13 +112,13 @@ if __name__ == "__main__":
     full_field = full_field.at[~mask].set(jnp.real(mrDMD_result.ravel()))  # plug DMD output back into valid locations
     full_field = full_field.reshape((180, 360))
     
-    DMD_full_field = jnp.full(mask.shape, jnp.nan)
-    DMD_full_field = DMD_full_field.at[~mask].set(X_rec_real[:, test_time])  # plug DMD output back into valid locations
-    DMD_full_field = DMD_full_field.reshape((180, 360))
+    # DMD_full_field = jnp.full(mask.shape, jnp.nan)
+    # DMD_full_field = DMD_full_field.at[~mask].set(X_rec_real[:, test_time])  # plug DMD output back into valid locations
+    # DMD_full_field = DMD_full_field.reshape((180, 360))
 
-    true_field = jnp.full(mask.shape, jnp.nan)
-    true_field = true_field.at[~mask].set(jnp.real(sst_flat[:, test_time]))
-    true_field = true_field.reshape((180, 360))
+    # true_field = jnp.full(mask.shape, jnp.nan)
+    # true_field = true_field.at[~mask].set(jnp.real(sst_flat[:, test_time]))
+    # true_field = true_field.reshape((180, 360))
 
     phi_1997 = Phis[3][2][2]    # El Nino
     phi_1999 = Phis[3][3][2]    # La Nina
@@ -160,9 +161,12 @@ if __name__ == "__main__":
     plt.show()
 
     # Plot error
+    print("sst_flat shape", sst_flat.shape)
+    print(fun(1).shape)
+    # raise 
     mrDMD_reconstruct = jnp.zeros_like(sst_flat)
     for i in range(t_steps):
-        X_at_step = fun(ts[i])[:X.shape[0]].ravel()
+        X_at_step = fun(ts[i])[:spatial_size,0].ravel()
         mrDMD_reconstruct = mrDMD_reconstruct.at[:, i].set(X_at_step)
 
 
@@ -172,8 +176,8 @@ if __name__ == "__main__":
     max_error_idx = jnp.argmax(error_mrDMD[:-2])
     print(ts[max_error_idx])
 
-    plt.plot(ts[:-2], error_DMD[:-2], label="Normal DMD")
-    plt.plot(ts[:-2], error_mrDMD[:-2], label="mrDMD")
+    plt.plot(ts[:-12], error_DMD[:-2], label="Normal DMD")
+    plt.plot(ts[:-12], error_mrDMD[:-2], label="mrDMD")
     plt.legend()
     plt.savefig("sst_error.png")
     plt.show()

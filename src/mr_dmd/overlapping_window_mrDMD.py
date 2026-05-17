@@ -131,7 +131,7 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window_function = lamb
             # Convert the eigenvalues and find the low frequency modes
 
             window_duration = jnp.abs((ts[idx_u] - ts[idx_l]))  # Watning the minus 1, may not be correct
-
+            # print("required frequency",1 / window_duration)
             freq = jnp.abs(jnp.imag(omega)) / (2 * jnp.pi)
 
             if j == -1 or j ==num_windows - 2:
@@ -224,7 +224,7 @@ if __name__ == "__main__":
 
     t_steps = 65 * 4
     n_steps = 20
-    r = 8
+
     t_max = 64
 
     # g = lambda x,t : 1*jnp.cos(x + t)
@@ -244,15 +244,16 @@ if __name__ == "__main__":
     X_prime = raw[:, 1:]
 
     # Run the DMD
-    L = 5
+    r = 6
+    L = 4
     M = r
     dt = t[1] - t[0]
 
     Phis, fun, _ = OmrDMD(X, X_prime, M, L, f, dt, t, energy_threshold=0.999, window_function= window)
     # Phi_DMD = DMD(X, X_prime, r)
 
-    t1 = 5
-    t2 = 50
+    t1 = 1
+    t2 = 49
 
     f_1 = fun(t1)
     f_10 = fun(t2)

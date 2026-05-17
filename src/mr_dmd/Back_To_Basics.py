@@ -2,44 +2,16 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import numpy as np
-from mr_dmd.DMD_funcs import mrDMD
-
-
-def DMD(X, Xprime, r, energy_threshold=0.999):
-    U, Sigma, VT = jnp.linalg.svd(X, full_matrices=False)  # Step 1
-    # Choose r adaptively based on singular value energy (prevents nans from forming)
-    total_energy = jnp.sum(Sigma**2)
-    cumulative_energy = jnp.cumsum(Sigma**2) / total_energy
-    r_adaptive = int(jnp.searchsorted(cumulative_energy, energy_threshold)) + 1
-    r_adaptive = min(r, r_adaptive, len(Sigma))  # never exceed requested r
-
-    Ur = U[:, :r_adaptive]
-    Sigmar = jnp.diag(Sigma[:r_adaptive])
-
-    Vr = VT[:r_adaptive, :].conj().T
-
-    Atilde = Ur.conj().T @ Xprime @ Vr @ jnp.linalg.inv(Sigmar)
-
-    Lambda, W = jnp.linalg.eig(Atilde)
-
-    # Use the standard DMD mode definition
-    Phi = Xprime @ Vr @ jnp.linalg.inv(Sigmar) @ W
-
-    # SIMPLE AMPLITUDE CALCULATION
-    # b represents the modal coordinates at t=0
-    b = jnp.linalg.lstsq(Phi, X[:, 0], rcond=None)[0]
-
-    return Phi, Lambda, b
+from mr_dmd.DMD_funcs import mrDMD, DMD
+from mr_dmd.overlapping_window_mrDMD import OmrDMD
 
 
 t_steps = 128
 n_steps = 20
-r = 30
 t_max = 128
 
 
 dt = t_max / t_steps
-
 
 def f(start, stop, t):
     # This uses JAX logic to return 0 or 1 without Python if/else
@@ -49,10 +21,10 @@ def f(start, stop, t):
 ts = jnp.linspace(0, t_max, t_steps)
 
 g_1 = lambda t: jnp.full_like(t, 0.2)
-g_2 = lambda t: 2 * jnp.cos(1 / (64) * 2 * jnp.pi * t)
+g_2 = lambda t: 2 * jnp.cos(1 / 64 * 2 * jnp.pi * t)
 
 g_3 = lambda t: 2 * jnp.sin(1 / 32 * jnp.pi * 2 * t) * f(0, 64, t)
-g_4 = lambda t: 2 * jnp.sin(1 / 8 * t * jnp.pi * 2) * f(64, 96, t)
+g_4 = lambda t: 2 * jnp.sin(1 / 16 * jnp.pi * 2 * t) * f(64, 96, t)
 
 
 g_funcs = [g_1, g_2, g_3, g_4]
@@ -94,7 +66,7 @@ psi4 = np.exp(-((X + x_offset) ** 2 + Y**2) / (2 * sigma_lobe**2)) + np.exp(
 final_func = lambda t: (
     g_1(t)[:, None, None] * psi1
     + g_2(t)[:, None, None] * psi2
-    # + g_3(t)[:, None, None] * psi3
+    + g_3(t)[:, None, None] * psi3
     + g_4(t)[:, None, None] * psi4
 )
 
@@ -119,20 +91,24 @@ print("Shape of data flat", data_flat.shape)
 
 X_hankel = H[:, :-1]
 Xprime_hankel = H[:, 1:]
+
 spatial_size = len(xs) * len(ys)
 
 M = 6
-L = 6
-r = 20
+L = 7
+r = 30
 
-Phis_DMD, Lambda, b = DMD(X_hankel, Xprime_hankel, r, energy_threshold=2)
-Phis, func, time_funcs = mrDMD(X_hankel, Xprime_hankel, M, L, f, dt, ts)
+
+Phis, func, time_funcs = mrDMD(input, output, M, L, f, dt, ts)
+# r = len(Phis)*4
+
+Phis_DMD, Lambda, b = DMD(input, output, r, energy_threshold=2)
 
 mrDMD_reconstruct = jnp.zeros_like(data_flat)
 
 for i in range(t_steps):
     X_at_step = func(ts[i])[:spatial_size]
-    mrDMD_reconstruct = mrDMD_reconstruct.at[:, i].set(X_at_step)
+    mrDMD_reconstruct = mrDMD_reconstruct.at[:, i].set(X_at_step.ravel())
 
 print(func(118))
 print(func(119))
@@ -146,41 +122,65 @@ X_rec = jnp.dot(Phis_DMD, dynamics)
 X_rec_real = jnp.real(X_rec)
 
 
-print(X_rec_real.shape)
-
-# print("Normal DMD square error ",jnp.mean((X_rec_real[:spatial_size]-data_flat)**2, axis=0))
-# print("mrDMD square errpor ", jnp.mean((mrDMD_reconstruct - data_flat)**2, axis= 0))
 error_DMD = jnp.mean((X_rec_real[:spatial_size] - data_flat) ** 2, axis=0)
 error_mrDMD = jnp.mean((mrDMD_reconstruct - data_flat) ** 2, axis=0)
 
 
-plt.plot(ts, error_DMD, label="Normal DMD")
-plt.plot(ts, jnp.mean((mrDMD_reconstruct - data_flat) ** 2, axis=0), label="mrDMD")
+plt.plot(ts[:-12], error_DMD[:-12], label="Normal DMD")
+plt.plot(ts[:-12], jnp.mean((mrDMD_reconstruct - data_flat) ** 2, axis=0)[:-12], label="mrDMD")
 plt.legend()
 plt.show()
 
 
+DMD_reconstruct = X_rec_real[:spatial_size,:]
+
+
 # Animation of mrDMD_reconstruct frames
-fig2, ax2 = plt.subplots()
-frame0 = jnp.real(mrDMD_reconstruct[:, 0]).reshape(len(ys), len(xs))
-im = ax2.imshow(
-    np.asarray(frame0).T,
-    cmap="viridis",
+fig2, (ax2, ax3, ax4) = plt.subplots(1, 3, figsize=(18, 5), sharex=True, sharey=True)
+frame0_mr = jnp.real(mrDMD_reconstruct[:, 0]).reshape(len(ys), len(xs))
+frame0_dmd = jnp.real(DMD_reconstruct[:, 0]).reshape(len(ys), len(xs))
+frame0_true = jnp.real(data_flat[:, 0]).reshape(len(ys), len(xs))
+vmin = float(jnp.minimum(jnp.minimum(jnp.min(mrDMD_reconstruct), jnp.min(DMD_reconstruct)), jnp.min(data_flat)))
+vmax = float(jnp.maximum(jnp.maximum(jnp.max(mrDMD_reconstruct), jnp.max(DMD_reconstruct)), jnp.max(data_flat)))
+im_dmd = ax2.imshow(
+    np.asarray(frame0_dmd).T,
+    cmap="jet",
     origin="lower",
-    vmin=jnp.min(mrDMD_reconstruct),
-    vmax=jnp.max(mrDMD_reconstruct),
+    vmin=vmin,
+    vmax=vmax,
 )
-ax2.set_title("mrDMD reconstruction")
+im_mr = ax3.imshow(
+    np.asarray(frame0_mr).T,
+    cmap="jet",
+    origin="lower",
+    vmin=vmin,
+    vmax=vmax,
+)
+im_true = ax4.imshow(
+    np.asarray(frame0_true).T,
+    cmap="jet",
+    origin="lower",
+    vmin=vmin,
+    vmax=vmax,
+)
+ax2.set_title("DMD reconstruction")
+ax3.set_title("mrDMD reconstruction")
+ax4.set_title("True Data")
 
 
 def update(frame):
-    data = jnp.real(mrDMD_reconstruct[:, frame]).reshape(len(ys), len(xs))
-    im.set_data(np.asarray(data).T)
-    ax2.set_xlabel(f"Time step: {frame}")
-    return (im,)
+    data_mr = jnp.real(mrDMD_reconstruct[:, frame]).reshape(len(ys), len(xs))
+    data_dmd = jnp.real(DMD_reconstruct[:, frame]).reshape(len(ys), len(xs))
+    data_true = jnp.real(data_flat[:, frame]).reshape(len(ys), len(xs))
+    im_mr.set_data(np.asarray(data_mr).T)
+    im_dmd.set_data(np.asarray(data_dmd).T)
+    im_true.set_data(np.asarray(data_true).T)
+    return (im_mr, im_dmd, im_true)
 
 
-ani = animation.FuncAnimation(fig2, update, frames=t_steps, interval=100, blit=True)
+ani = animation.FuncAnimation(fig2, update, frames=t_steps-12, interval=100, blit=True)
+
+ani.save("images/mr_dmd_comparison.gif", writer="pillow", fps=10)
 plt.show()
 
 
