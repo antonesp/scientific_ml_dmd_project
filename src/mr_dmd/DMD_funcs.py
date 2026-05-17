@@ -44,9 +44,9 @@ def DMD_safe(X, Y, r, dt, energy_threshold):
 
     # 4. Convert to Omega and CLAMP
     omega = jnp.log(Lambda_clipped) / dt
-    omega = jnp.minimum(jnp.real(omega), 0.0) + 1j * jnp.imag(
-        omega
-    )  # Force Re(omega) <= 0 to prevent the explosion at t=64
+    # omega = jnp.minimum(jnp.real(omega), 0.0) + 1j * jnp.imag(
+    #     omega
+    # )  # Force Re(omega) <= 0 to prevent the explosion at t=64
 
     return Phi, b, omega
 
@@ -91,7 +91,7 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
 
             bin_relative_nergy = jnp.linalg.norm(X_bin) / jnp.linalg.norm(X_original[:, ts_idx[j] : ts_idx[j + 1]])
             print("realtive energy", bin_relative_nergy)
-            if bin_relative_nergy <= 1e-2:
+            if bin_relative_nergy <= 5e-3:
                 print(f"To low energy in Layer {l+1}, Bin {j+1}. Skipping.")
 
                 continue
@@ -114,7 +114,8 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
                 continue
 
             # Convert the eigenvalues and find the low frequency modes
-            window_duration = jnp.abs((ts[ts_idx[j + 1]] - ts[ts_idx[j]]))  # Watning the minus 1, may not be correct
+            # window_duration = jnp.abs((ts[ts_idx[j + 1]-1] - ts[ts_idx[j]]))  # Watning the minus 1, may not be correct
+            window_duration = jnp.abs(ts[ts_idx[j + 1] - 1] - ts[ts_idx[j]]) + dt
             freq = jnp.abs(jnp.imag(omega)) / (2 * jnp.pi)
             mask = freq <= 1 / (window_duration)
 
@@ -131,10 +132,13 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
             for i in range(0, Phi_low.shape[1]):
                 Phis.append(Phi_low[:, i][:, None])
 
+
+ 
             def robust_reconstruction(
-                t, start=ts[ts_idx[j]], stop=ts[ts_idx[j + 1] - 1], P=Phi_low, b=b_low, o=omega_low
+                t, start=ts[ts_idx[j]], stop=ts[ts_idx[j + 1]-1], P=Phi_low, b=b_low, o=omega_low
             ):
                 # This prevents any NaN in P, b, or o from leaking into t < start or t > stop
+                
                 dynamics = jnp.real(P @ (b[:, None] * jnp.exp(o[:, None] * (t - start))))              
 
                 # 2. Make mask to fit on time bin
@@ -142,6 +146,8 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
 
                 # 3. Apply the mask
                 return jnp.where(mask, dynamics, 0.0)
+
+
                 
 
             funcs.append(robust_reconstruction)
@@ -160,13 +166,17 @@ def mrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window = False):
 
             Y_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_local + dt)) * b_low[:, None])
 
-            X_residual = X_residual.at[:, ts_idx[j] : ts_idx[j + 1]].add(-X_low)
+            # X_residual = X_residual.at[:, ts_idx[j] : ts_idx[j + 1]].add(-X_low)
 
-            Y_residual = Y_residual.at[:, ts_idx[j] : ts_idx[j + 1]].add(-Y_low)
+            # Y_residual = Y_residual.at[:, ts_idx[j] : ts_idx[j + 1]].add(-Y_low)
 
-        X = X_residual
+            X = X.at[:, ts_idx[j] : ts_idx[j + 1]].add(-X_low)
 
-        Y = Y_residual
+            Y = Y.at[:, ts_idx[j] : ts_idx[j + 1]].add(-Y_low)
+
+        # X = X_residual
+
+        # Y = Y_residual
 
     # Sum all the functions together
     return Phis, lambda t: sum(g(t) for g in funcs), time_funcs
@@ -185,7 +195,7 @@ if __name__ == "__main__":
     g = sum_of_sines(seed, 10)
 
     # Mexican hat
-    f = make_wavelet_window("gaus2")
+    # f = make_wavelet_window("gaus2")
     f = indicator
 
     x = jnp.linspace(0, 2 * jnp.pi, n_steps)
