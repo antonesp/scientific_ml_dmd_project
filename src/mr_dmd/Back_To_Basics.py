@@ -110,10 +110,7 @@ for i in range(t_steps):
     X_at_step = func(ts[i])[:spatial_size]
     mrDMD_reconstruct = mrDMD_reconstruct.at[:, i].set(X_at_step.ravel())
 
-print(func(118))
-print(func(119))
-print(func(127))
-# print(mrDMD_reconstruct[0,0:17])
+
 k = jnp.arange(t_steps)
 v_lambda = Lambda[:, None] ** k
 dynamics = b[:, None] * v_lambda
@@ -183,77 +180,3 @@ ani = animation.FuncAnimation(fig2, update, frames=t_steps-12, interval=100, bli
 ani.save("images/mr_dmd_comparison.gif", writer="pillow", fps=10)
 plt.show()
 
-
-# all_trajectories = []
-# for tf in time_funcs:
-#     # Evaluate the lambda function for the entire time array
-#     # tf(t_eval) returns (r_low, t_steps)
-#     traj = tf(ts)
-
-#     all_trajectories.append(traj)
-
-# all_modes_matrix = jnp.vstack(all_trajectories)
-
-# n_modes = all_modes_matrix.shape[0]
-# fig, axes = plt.subplots(n_modes, 1, figsize=(10, 2.5 * n_modes), sharex=True)
-# if n_modes == 1:
-#     axes = [axes]
-
-# for i, ax in enumerate(axes):
-#     ax.plot(ts, all_modes_matrix.real[i], alpha=0.7)
-#     ax.set_title(f"Mode {i + 1}")
-#     ax.set_ylabel("Amplitude")
-
-
-# axes[-1].set_xlabel("Time")
-# plt.tight_layout()
-# # plt.show()
-
-# k = jnp.arange(len(ts))  # [0, 1, 2, ..., 99]
-
-# all_time_functions = b[:, None] * (Lambda[:, None] ** k)
-
-
-# reconstructed_g_all = jnp.real(all_time_functions)
-
-
-# fig, axes = plt.subplots(reconstructed_g_all.shape[0], 1, figsize=(10, 2.5 * reconstructed_g_all.shape[0]), sharex=True)
-# if reconstructed_g_all.shape[0] == 1:
-#     axes = [axes]
-
-# for i, ax in enumerate(axes):
-#     ax.plot(np.asarray(k), np.asarray(reconstructed_g_all[i]))
-#     ax.set_title(f"Reconstructed mode {i + 1}")
-#     ax.set_ylabel("Amplitude")
-
-# axes[-1].set_xlabel("Time index")
-# plt.tight_layout()
-# # plt.show()
-
-
-# num_phis = len(Phis)
-# fig, ax = plt.subplots(1, num_phis, figsize=(5 * num_phis, 5), squeeze=False)
-
-# for i, phi in enumerate(Phis):
-#     phi_grid = jnp.real(phi[:spatial_size, 0]).reshape(len(ys), len(xs))
-#     im = ax[0, i].contourf(X, Y, phi_grid.T, levels=20, cmap="hot")
-#     ax[0, i].set_title(f"Phi {i + 1}")
-#     ax[0, i].set_xlabel("x")
-#     ax[0, i].set_ylabel("y")
-
-# plt.tight_layout()
-# # plt.show()
-
-
-# num_phis_dmd = Phis_DMD.shape[1]
-# fig, ax = plt.subplots(1, num_phis_dmd, figsize=(5 * num_phis_dmd, 5), squeeze=False)
-
-# for i in range(num_phis_dmd):
-#     phi_grid = jnp.real(Phis_DMD[:spatial_size, i]).reshape(len(ys), len(xs))
-#     im = ax[0, i].contourf(X, Y, phi_grid.T, levels=20, cmap="hot")
-#     ax[0, i].set_title(f"DMD Phi {i + 1}")
-#     ax[0, i].set_xlabel("x")
-#     ax[0, i].set_ylabel("y")
-
-# plt.tight_layout()
-# # plt.show()
