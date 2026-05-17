@@ -29,30 +29,28 @@ def DMD(X, Xprime, r, energy_threshold=0.999):
     return Phi, Lambda, b
 
 
-def DMD_safe(X, Y, r, dt, energy_threshold):
+def DMD_safe(X, Y, r, dt, energy_threshold, window_duration):
     # 1. Energy check: if the bin is already empty, return None
     if jnp.linalg.norm(X) < 1e-5:
-        return None, None, None
+        return None, None, None, None
 
     # 2. Perform standard DMD
     Phi, Lambda, b = DMD(X, Y, r, energy_threshold)
 
     # 3. Handle Numerical Singularities
-    eps = 1e-7
-    Lambda_safe = jnp.where(
-    jnp.abs(Lambda) < eps,
-    eps * jnp.exp(1j * jnp.angle(Lambda)),
-    Lambda,
-)
     Lambda_clipped = jnp.where(jnp.abs(Lambda) < 1e-7, 1e-7, Lambda)  # Clip Lambda to prevent log(0)
+    # Lambda_clipped = Lambda
 
     # 4. Convert to Omega and CLAMP
-    omega = jnp.log(Lambda_safe) / dt
-    omega = jnp.minimum(jnp.real(omega), 10.0) + 1j * jnp.imag(
-        omega
-    )  # Force Re(omega) <= 0 to prevent the explosion at t=64
+    omega = jnp.log(Lambda_clipped) / dt
+
+    # Clamp Re(omega) in [-1/window_duration, 0] to prevent modes that stabilize too quickly or are unstable (prevents the explosion at t=64)
+    omega = jnp.maximum(jnp.minimum(jnp.real(omega), 0), -1/window_duration) + 1j * jnp.imag(
+            omega
+        )  
 
     return Phi, b, omega
+
 
 
 def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window_function = lambda start, stop, t: 0.5*jnp.ones_like(t)):
@@ -75,6 +73,7 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window_function = lamb
     time_funcs = []
     Phis = []
 
+
     for l in range(L):
         X_residual = jnp.copy(X)
         Y_residual = jnp.copy(Y)
@@ -83,36 +82,32 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window_function = lamb
         r = M
 
         window_width = X.shape[1] // J
-        stride = window_width // 2
-
+        stride = jnp.maximum(window_width // 2, 1)
+        
         if X.shape[1] < r:
             print("Not enough timesteps for desired resolution")
 
             break
 
-        num_windows = (X_original.shape[1]-window_width) // stride 
-        print(f"{window_width=}")
+        num_windows = 2*J
+        print(f"{window_width=}, {num_windows=}")
 
-        for j in range(-1, num_windows - 1):
+        Phi_l = []
+
+        for j in range(num_windows):
            
-            if j == -1:
-                idx_l = 0
-                idx_u = window_width // 2 + 1
-            elif j == num_windows - 2:
-                idx_l = stride * j
-                idx_u = stride * (j + 1)
-            else:
-                idx_l = j * stride
-
-                idx_u = jnp.minimum(idx_l + window_width + 1, X_original.shape[1])
+            idx_l = j * stride
+            idx_u = jnp.minimum(idx_l + window_width + 1, X_original.shape[1])
 
             t_segment = ts[idx_l:idx_u]
             t_local = t_segment - t_segment[0]
+            window_duration = jnp.abs((ts[idx_u] - ts[idx_l]))
 
             X_bin = X[:, idx_l:idx_u]
             Y_bin = Y[:, idx_l:idx_u]
-            bin_relative_nergy = jnp.linalg.norm(X_bin) / jnp.linalg.norm(X_original[:, idx_l:idx_u])
+            Phi_j= []
 
+            bin_relative_nergy = jnp.linalg.norm(X_bin) / jnp.linalg.norm(X_original[:, idx_l:idx_u])
             print("realtive energy", bin_relative_nergy)
 
             if bin_relative_nergy <= 1e-2:
@@ -121,29 +116,28 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window_function = lamb
                 continue
 
             # Compute DMD for each time bin
-            Phi, b, omega = DMD_safe(X_bin, Y_bin, r, dt, energy_threshold)
+            Phi, b, omega = DMD_safe(X_bin, Y_bin, r, dt, energy_threshold, window_duration)
 
             if Phi is None or jnp.any(jnp.isnan(b)) or jnp.any(jnp.isnan(omega)):
                 print(f"Numerical instability detected in Layer {l+1}, Bin {j+1}. Skipping.")
+                continue
 
+            if Phi is None:
+                print("Phi was nan")
+                continue
+
+            if X_bin.shape[0] < 2:
                 continue
 
             # Convert the eigenvalues and find the low frequency modes
-
-            window_duration = jnp.abs((ts[idx_u] - ts[idx_l]))  # Watning the minus 1, may not be correct
-            # print("required frequency",1 / window_duration)
             freq = jnp.abs(jnp.imag(omega)) / (2 * jnp.pi)
-
-            if j == -1 or j ==num_windows - 2:
-                mask = freq <= 4 / (2 * window_duration)
-            else:
-                mask = freq <= 4 / (window_duration)
+            mask = freq <= 4 / window_duration
 
             # Extract low frequency modes to the mrDMD function
             Phi_low = Phi[:, mask]
             b_low = b[mask]
             omega_low = omega[mask]
-            omega_low = jnp.minimum(jnp.real(omega_low), 0.0) + 1j * jnp.imag(omega_low)
+           
             
             #Continue if no modes are found
             if Phi_low.shape[1]==0:
@@ -151,7 +145,7 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window_function = lamb
 
             print(f"Saving {Phi_low.shape[1]} mode(s) in (j={j+1}, l={l+1})")
             for i in range(0, Phi_low.shape[1]):
-                Phis.append(Phi_low[:, i][:, None])
+                Phi_j.append(Phi_low[:, i][:, None])
 
             bin_start = float(ts[idx_l])
 
@@ -190,30 +184,30 @@ def OmrDMD(X, Y, M, L, f, dt, ts, energy_threshold=0.999, window_function = lamb
             )
 
             # Reconstruct X using only the low frequency modes for each time bin
-
-            if j == -1:
+            if j == 0:
                 shift = (t_segment[-1] - t_segment[0])
                 #print(f"Original start= {t_segment[0]}, Shifted start = {t_segment[0]- shift}, end = {t_segment[-1]}")
                 window = window_function(t_segment[0]- shift, t_segment[-1], t_segment)
-            elif j == num_windows -2:
+            elif j == num_windows -1:
                 shift = (t_segment[-1] - t_segment[0])
                 #print(f"Original start= {t_segment[0]}, Shifted start = {t_segment[0]}, end = {t_segment[-1]+shift}")
                 window = window_function(t_segment[0], t_segment[-1] + shift, t_segment)
             else:
                 window = window_function(t_segment[0], t_segment[-1], t_segment)
-            
-            #print(window.shape, Phi_low.shape, t_segment.shape, b_low.shape)
-            #print(jnp.outer(omega_low, t_local).shape)
+
            
 
-            X_low = Phi_low @ (jnp.exp((jnp.outer(omega_low, t_local))) * window * b_low[:, None])
-            Y_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_local + dt)) * window * b_low[:, None])
+            X_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, t_local))* window * b_low[:, None])
+            Y_low = Phi_low @ (jnp.exp(jnp.outer(omega_low, (t_local + dt))) * window * b_low[:, None])
             X_residual = X_residual.at[:, idx_l:idx_u].add(-X_low)
             Y_residual = Y_residual.at[:, idx_l:idx_u].add(-Y_low)
 
+            Phi_l.append(Phi_j)
+
         X = X_residual
         Y = Y_residual
-
+        Phis.append(Phi_l)
+            
     # Sum all the functions together
 
     return Phis, lambda t: sum(g(t) for g in funcs), time_funcs
